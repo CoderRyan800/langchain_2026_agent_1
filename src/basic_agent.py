@@ -34,7 +34,7 @@ agent = create_agent(
     middleware=[
         SummarizationMiddleware(
             model="gpt-4o-mini",
-            trigger=("tokens", 1000),
+            trigger=("messages", 10),
             keep=("messages", 3)
         )
     ],

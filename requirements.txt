@@ -7,3 +7,7 @@ langchain-openai>=1.1.6
 langgraph>=1.0.5
 langgraph-checkpoint>=3.0.1
 langgraph-checkpoint-sqlite>=3.0.3
+# Litter box agent — image embeddings and vector search
+chromadb>=0.6.0
+sentence-transformers>=3.0.0
+Pillow>=10.0.0

@@ -17,15 +17,9 @@ A conversational AI agent built with LangChain and LangGraph, featuring persiste
 
 ### Prerequisites
 
-- Conda environment: `langchain_env_2026_1`
-- API keys in a `.env` file (see below)
-
-### Environment
-
-```bash
-conda activate langchain_env_2026_1
-pip install langgraph-checkpoint-sqlite
-```
+- Python 3.11+
+- An OpenAI API key (with access to `gpt-4o`)
+- A Tavily API key
 
 ### `.env` file
 
@@ -36,12 +30,35 @@ OPENAI_API_KEY=your_openai_api_key
 TAVILY_API_KEY=your_tavily_api_key
 ```
 
+### Option A — Conda environment
+
+```bash
+conda create -n langchain_env_2026_1 python=3.11 -y
+conda activate langchain_env_2026_1
+pip install -r requirements.txt
+```
+
+### Option B — Python venv
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
+pip install -r requirements.txt
+```
+
 ---
 
 ## Running the agent
 
+**Conda:**
 ```bash
 conda activate langchain_env_2026_1
+python src/basic_agent.py
+```
+
+**venv:**
+```bash
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 python src/basic_agent.py
 ```
 
@@ -151,5 +168,6 @@ config = {"configurable": {"thread_id": "2"}}
 ├── agent_memory.db      # SQLite conversation store (gitignored)
 ├── .env                 # API keys (gitignored)
 ├── .gitignore
+├── requirements.txt
 └── README.md
 ```

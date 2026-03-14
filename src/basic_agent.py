@@ -33,7 +33,7 @@ agent = create_agent(
     tools=[web_search],
     middleware=[
         SummarizationMiddleware(
-            model="gpt-4o-mini",
+            model="gpt-5-nano",
             trigger=("messages", 10),
             keep=("messages", 3)
         )

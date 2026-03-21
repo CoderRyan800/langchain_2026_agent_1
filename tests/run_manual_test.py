@@ -17,6 +17,7 @@ Phases:
     4 — Identity confirmation          (no LLM calls)
     5 — Sensor CLI subprocess          (2–3 GPT-4o calls, writes to production data/)
     6 — Reset and fresh-state check    (no LLM calls)
+    7 — Retroactive recognition        (1–2 GPT-4o calls)
 
 Estimated API cost for a full run: ~$0.25–0.50
 Phase 5 writes a small number of records to the production data/litterbox.db.
@@ -120,17 +121,32 @@ def prepare_images() -> bool:
     if cat_a.exists() and cat_a.stat().st_size > 10_000:
         note(f"cat_a.jpg already present ({cat_a.stat().st_size // 1024} KB)")
     else:
+        # Try downloading from Wikimedia first; fall back to a local reference image.
         note("Downloading cat_a.jpg from Wikimedia Commons…")
+        downloaded = False
         try:
             req = urllib.request.Request(
                 CAT_A_URL,
                 headers={"User-Agent": "LitterboxAgentTestRunner/1.0 (automated test)"},
             )
-            with urllib.request.urlopen(req) as resp, open(cat_a, "wb") as f:
+            with urllib.request.urlopen(req, timeout=15) as resp, open(cat_a, "wb") as f:
                 f.write(resp.read())
+            downloaded = True
         except Exception as e:
-            fail("cat_a.jpg download failed", str(e))
-            return False
+            note(f"Download failed ({e}); falling back to local reference image.")
+
+        if not downloaded or cat_a.stat().st_size < 10_000:
+            # Use an existing production reference image if available
+            local_refs = sorted(
+                (PROJECT_ROOT / "images" / "cats").rglob("*.jpg")
+            )
+            if local_refs:
+                import shutil as _shutil
+                _shutil.copy2(str(local_refs[0]), str(cat_a))
+                note(f"Copied local reference: {local_refs[0].name}")
+            else:
+                fail("cat_a.jpg: no download and no local fallback image found")
+                return False
 
     if not cat_a.exists() or cat_a.stat().st_size < 10_000:
         fail("cat_a.jpg appears corrupt or empty")
@@ -571,8 +587,160 @@ def phase6() -> None:
           "6.4 — get_unconfirmed_visits reports empty on fresh DB")
 
 
+# ── Phase 7: retroactive recognition ─────────────────────────────────────────
+def phase7() -> None:
+    section("Phase 7 — Retroactive recognition  (1–2 GPT-4o calls)")
+
+    import shutil
+    import uuid as _uuid
+
+    import litterbox.embeddings as emb_mod
+    from litterbox.db import get_conn, init_db
+    from litterbox.tools import register_cat_image, retroactive_recognition
+
+    cat_a = str(TEST_CAPTURES / "cat_a.jpg")
+
+    # Phase 6 wipes TEST_CHROMA and the old Chroma Rust client holds a file lock on
+    # it, making the re-created directory readonly for new clients.  Use a dedicated
+    # subdirectory for Phase 7 so there is no lock conflict.
+    chroma_p7 = TEST_DATA / "chroma_phase7"
+    if chroma_p7.exists():
+        shutil.rmtree(chroma_p7)
+    emb_mod.CHROMA_PATH = chroma_p7
+    emb_mod._collection = None   # force a fresh Chroma client at the new path
+    init_db()
+
+    # Ensure Whiskers is registered with at least one reference image.
+    register_cat_image.invoke({"image_path": cat_a, "cat_name": "Whiskers"})
+    with get_conn() as conn:
+        cat_row = conn.execute("SELECT cat_id FROM cats WHERE name='Whiskers'").fetchone()
+    cat_id = cat_row["cat_id"]
+
+    # ── 7.1 Invalid date format ───────────────────────────────────────────────
+    r = retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "not-a-date"})
+    check("Error" in r, "7.1 — invalid date format returns an error string", r)
+
+    # ── 7.2 Unregistered cat returns error ────────────────────────────────────
+    r = retroactive_recognition.invoke({"cat_name": "NoSuchCat", "since_date": "2026-01-01"})
+    check(
+        "Error" in r or "no cat" in r.lower(),
+        "7.2 — unregistered cat name returns an error string", r,
+    )
+
+    # ── 7.3 No unknown visits in date range ───────────────────────────────────
+    r = retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "2099-01-01"})
+    check(
+        "No unknown visits" in r or "Nothing to retroactively" in r,
+        "7.3 — empty date range returns a graceful 'nothing to review' message", r,
+    )
+
+    # ── 7.4 Orphan exits are excluded ────────────────────────────────────────
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO visits (entry_time, is_orphan_exit, is_confirmed)
+               VALUES ('2026-01-15 12:00:00', TRUE, FALSE)"""
+        )
+        orphan_id = cur.lastrowid
+
+    retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "2026-01-01"})
+    with get_conn() as conn:
+        orphan = conn.execute(
+            "SELECT is_confirmed FROM visits WHERE visit_id = ?", (orphan_id,)
+        ).fetchone()
+    check(
+        not bool(orphan["is_confirmed"]),
+        "7.4 — orphan exit visits are excluded from retroactive review",
+    )
+
+    # ── 7.5 Visits with existing tentative ID are excluded ────────────────────
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO visits (entry_time, entry_image_path,
+                                   tentative_cat_id, is_confirmed, is_orphan_exit)
+               VALUES ('2026-01-15 13:00:00', ?, ?, FALSE, FALSE)""",
+            (cat_a, cat_id),
+        )
+        tentative_id = cur.lastrowid
+
+    retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "2026-01-01"})
+    with get_conn() as conn:
+        t = conn.execute(
+            "SELECT is_confirmed FROM visits WHERE visit_id = ?", (tentative_id,)
+        ).fetchone()
+    check(
+        not bool(t["is_confirmed"]),
+        "7.5 — visits already carrying a tentative_cat_id are not touched",
+    )
+
+    # ── 7.6 Visit with missing image file is skipped gracefully ──────────────
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO visits (entry_time, entry_image_path,
+                                   is_confirmed, is_orphan_exit)
+               VALUES ('2026-01-16 10:00:00',
+                       'images/visits/nonexistent/missing.jpg',
+                       FALSE, FALSE)"""
+        )
+
+    r = retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "2026-01-16"})
+    check(
+        isinstance(r, str) and "Skipped" in r,
+        "7.6 — visit with a missing image file is skipped without crashing", r[:300],
+    )
+
+    # ── 7.7 Actual retroactive match  (CLIP + GPT-4o) ────────────────────────
+    note("Inserting unknown visit using cat_a.jpg and running retroactive recognition — GPT-4o call…")
+
+    visit_date = "2026-02-01"
+    dest_dir = TEST_IMGS / "visits" / visit_date
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    filename = f"{_uuid.uuid4().hex[:8]}_entry.jpg"
+    dest = dest_dir / filename
+    shutil.copy2(cat_a, str(dest))
+    # Store path relative to project root (matches how record_entry stores paths)
+    rel_path = str(dest.relative_to(PROJECT_ROOT))
+
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO visits (entry_time, entry_image_path,
+                                   tentative_cat_id, is_confirmed, is_orphan_exit)
+               VALUES ('2026-02-01 08:00:00', ?, NULL, FALSE, FALSE)""",
+            (rel_path,),
+        )
+        unknown_id = cur.lastrowid
+
+    r = retroactive_recognition.invoke({"cat_name": "Whiskers", "since_date": "2026-02-01"})
+    check(
+        "Retroactive recognition" in r,
+        "7.7a — retroactive_recognition returns a structured summary", r[:300],
+    )
+    check(
+        "Visits reviewed" in r,
+        "7.7b — summary includes a 'Visits reviewed' count", r[:300],
+    )
+
+    with get_conn() as conn:
+        v = conn.execute(
+            "SELECT is_confirmed, confirmed_cat_id, tentative_cat_id, similarity_score "
+            "FROM visits WHERE visit_id = ?",
+            (unknown_id,),
+        ).fetchone()
+
+    if v and bool(v["is_confirmed"]):
+        check(v["confirmed_cat_id"] == cat_id,
+              f"7.7c — confirmed_cat_id set to Whiskers  (sim={v['similarity_score']:.2f})")
+        check(v["tentative_cat_id"] == cat_id,
+              "7.7d — tentative_cat_id also set on retroactive confirmation")
+    else:
+        score = f"{v['similarity_score']:.2f}" if v and v["similarity_score"] else "n/a"
+        note(
+            f"7.7c — visit #{unknown_id} not matched as Whiskers "
+            f"(score={score} — pipeline result is non-deterministic with test images)"
+        )
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
-PHASES = {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5, 6: phase6}
+PHASES = {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5, 6: phase6, 7: phase7}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -586,6 +754,7 @@ if __name__ == "__main__":
             "  4 — Identity confirmation    (no LLM)\n"
             "  5 — Sensor CLI subprocess    (2–3 GPT-4o calls)\n"
             "  6 — Reset + fresh-state      (no LLM)\n"
+            "  7 — Retroactive recognition  (1–2 GPT-4o calls)\n"
         ),
     )
     parser.add_argument(

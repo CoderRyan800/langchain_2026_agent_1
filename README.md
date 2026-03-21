@@ -57,6 +57,7 @@ python src/litterbox_agent.py --event exit  --image images/captures/exit.jpg
 ```bash
 python tests/run_manual_test.py          # full suite (~$0.25–0.50 in API calls)
 python tests/run_manual_test.py --phase 1  # storage/tools only — free
+python tests/run_manual_test.py --phase 7  # retroactive recognition only
 ```
 
 ---
@@ -75,6 +76,9 @@ The litter box agent tracks when cats use the litter box and flags potential hea
 ```
 You: /UPLOAD /path/to/whiskers.jpg
 You: Whiskers
+Agent: When did you get Whiskers? (YYYY-MM-DD)
+You: 2026-01-15
+Agent: [scans old unknown visits and confirms any that match]
 You: Show me all anomalous visits this month
 You: Visit 7 is confirmed as Whiskers
 ```
@@ -106,9 +110,9 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │       ├── db.py                # SQLite schema and query helpers
 │       ├── embeddings.py        # Local CLIP embeddings + Chroma vector search
 │       ├── health.py            # GPT-4o health analysis prompt and parser
-│       └── tools.py             # All 10 LangChain tools
+│       └── tools.py             # All 11 LangChain tools
 ├── tests/
-│   └── run_manual_test.py       # Manual test runner (6 phases, 62 checks)
+│   └── run_manual_test.py       # Manual test runner (7 phases, 72 checks)
 ├── docs/
 │   ├── USER_GUIDE.md            # Full user guide
 │   └── TESTING.md               # Test procedure and baseline results

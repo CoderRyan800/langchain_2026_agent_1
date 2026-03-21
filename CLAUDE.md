@@ -91,7 +91,7 @@ Each visit can capture readings from a weight scale and gas sensors. Data flows 
 - **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings)
 - **Time-series log in `visit_sensor_events`**: one row per reading with `phase` (pre_entry / entry / exit), `sensor_type`, `value_numeric`, and `unit`
 
-CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`.
+CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`. All are optional — omit any that are unavailable or malfunctioning. The flags are serialised into the sensor event prompt string; the LLM extracts the named values and passes them to the tool. See `docs/USER_GUIDE.md` §6 for full CLI examples and derivation rules.
 
 ### Health Analysis
 `record_exit()` sends entry+exit images to GPT-4o; sensor readings are included in the prompt when available. Response stored in `visits.health_notes` with `is_anomalous` flag. Response always includes a mandatory veterinary disclaimer.

@@ -96,7 +96,17 @@ You: Visit 7 is confirmed as Whiskers
 
 **Sensor-triggered** — called automatically by the camera system on entry and exit events. The agent runs without human input: it identifies the cat using a two-stage pipeline (local CLIP embeddings + GPT-4o visual confirmation), stores the visit record, and on exit runs a GPT-4o health analysis comparing the before and after images of the litter box.
 
-Optional sensor data (weight scale and ammonia/methane gas sensors) can be passed via CLI flags. When present, weight and gas readings are stored in the `visits` table as summary columns and in the `visit_sensor_events` time-series log. Cat weight and waste weight are derived automatically, peak gas readings are reconciled across entry and exit, and the health analysis prompt is enriched with all available sensor data.
+Optional sensor data (weight scale and ammonia/methane gas sensors) can be passed via CLI flags:
+
+| Flag | Event | Description |
+|------|-------|-------------|
+| `--weight-pre G` | entry | Box + litter baseline before cat enters (g) |
+| `--weight-entry G` | entry | Box + litter + cat at entry (g) |
+| `--weight-exit G` | exit | Box + litter + waste after cat leaves (g) |
+| `--ammonia-peak PPB` | entry or exit | Peak NH₃ reading (ppb) |
+| `--methane-peak PPB` | entry or exit | Peak CH₄ reading (ppb) |
+
+All flags are optional — omit any that are unavailable or malfunctioning. Cat weight (`weight_entry_g − weight_pre_g`), waste weight, and peak gas reconciliation are derived automatically. See [User Guide §6](docs/USER_GUIDE.md#6-sensor-integration) for full examples.
 
 All health findings include a mandatory disclaimer and require veterinary review.
 

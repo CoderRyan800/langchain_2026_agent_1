@@ -12,6 +12,9 @@ This guide covers day-to-day use of both agents in this project.
 4. [Litter Box Agent — Daily Workflow](#4-litter-box-agent--daily-workflow)
 5. [Litter Box Agent — Querying Records](#5-litter-box-agent--querying-records)
 6. [Sensor Integration](#6-sensor-integration)
+   - [Triggering events from the CLI](#how-sensor-events-are-triggered)
+   - [Passing weight and gas sensor data](#passing-weight-and-gas-sensor-data)
+   - [What the system derives automatically](#what-the-system-derives-from-sensor-data)
 7. [Understanding Health Alerts](#7-understanding-health-alerts)
 8. [Data and Storage](#8-data-and-storage)
 9. [Troubleshooting](#9-troubleshooting)
@@ -250,14 +253,77 @@ The agent returns the relative file paths — open them in any image viewer.
 The sensor system calls the agent directly from the command line when a camera detects motion at the litter box:
 
 ```bash
-# Cat detected entering
+# Cat detected entering (camera only — no scale or gas sensors)
 python src/litterbox_agent.py --event entry --image images/captures/entry_001.jpg
 
-# Cat detected exiting
+# Cat detected exiting (camera only)
 python src/litterbox_agent.py --event exit --image images/captures/exit_001.jpg
 ```
 
 The agent processes the image, runs the identification pipeline, writes the visit record to the database, and exits. No human input is required.
+
+### Passing weight and gas sensor data
+
+If your hardware includes a weight scale and/or gas sensors, pass their readings as additional flags. **All sensor flags are optional** — omit any that your hardware does not support or that produced a failed reading.
+
+**Entry event with full sensor data:**
+```bash
+python src/litterbox_agent.py \
+    --event entry \
+    --image images/captures/entry_001.jpg \
+    --weight-pre   5412 \     # box + litter weight before cat entered (grams)
+    --weight-entry 8634 \     # box + litter + cat weight at entry (grams)
+    --ammonia-peak 38 \       # peak NH₃ reading during entry phase (ppb)
+    --methane-peak 12         # peak CH₄ reading during entry phase (ppb)
+```
+
+**Exit event with full sensor data:**
+```bash
+python src/litterbox_agent.py \
+    --event exit \
+    --image images/captures/exit_001.jpg \
+    --weight-exit  5489 \     # box + litter + waste weight after cat left (grams)
+    --ammonia-peak 62 \       # peak NH₃ reading during/after exit (ppb)
+    --methane-peak 29         # peak CH₄ reading during/after exit (ppb)
+```
+
+**Mixed — scale present, gas sensors absent:**
+```bash
+python src/litterbox_agent.py \
+    --event entry \
+    --image images/captures/entry_001.jpg \
+    --weight-pre 5412 \
+    --weight-entry 8634
+    # ammonia-peak and methane-peak simply omitted
+```
+
+### What the system derives from sensor data
+
+The agent computes the following values automatically — you never need to calculate them yourself:
+
+| Derived value | Formula | Stored in |
+|---------------|---------|-----------|
+| `cat_weight_g` | `weight_entry_g − weight_pre_g` | `visits` table |
+| `waste_weight_g` | `weight_exit_g − weight_pre_g` | `visits` table |
+| Peak gas (final) | `MAX(entry_reading, exit_reading)` | `visits` table |
+
+Both the summary values and every individual raw reading are stored. The raw readings go into `visit_sensor_events` with a `phase` tag (`pre_entry`, `entry`, or `exit`) so you have the full time-series if you need it.
+
+### How sensor values reach the tools
+
+Internally, the CLI flags are serialised into a plain-English message that the LangGraph agent reads:
+
+```
+SENSOR EVENT: A cat has entered the litter box.
+Entry image path: images/captures/entry_001.jpg
+Sensor readings: weight_pre_g=5412, weight_entry_g=8634, ammonia_peak_ppb=38, methane_peak_ppb=12.
+```
+
+The agent extracts the named values from that message and passes them as parameters to `record_entry()`. This is why the system prompt (in `src/litterbox_agent.py`) explicitly instructs the agent to pass sensor readings from the event message to the tool — the LLM is the bridge between the CLI string and the tool call.
+
+### Sensor data in the health analysis
+
+When sensor readings are available, they are automatically included in the GPT-4o health analysis prompt on exit. The model sees the cat's measured weight, waste weight, and gas levels alongside the before/after images, which improves its ability to flag anomalies like elevated ammonia (potential urinary issues) or unexpected weight loss.
 
 ### Recommended directory layout for sensor captures
 
@@ -403,6 +469,15 @@ This means either:
 1. The cat's photo was not registered — run `/UPLOAD` with a clear reference photo
 2. The similarity score was below the 0.82 threshold — add more reference images taken from the camera's viewing angle
 3. GPT-4o did not confirm the CLIP match — this can happen in poor lighting. Improve camera lighting or add reference images taken in similar conditions.
+
+### Sensor data not appearing in the database
+
+If `cat_weight_g`, `waste_weight_g`, or gas readings are NULL in the database after a run:
+
+1. **Check flag spelling** — flags use hyphens: `--weight-pre`, `--weight-entry`, `--weight-exit`, `--ammonia-peak`, `--methane-peak`. Underscores will be silently ignored by argparse.
+2. **Check which event gets which flags** — `--weight-pre` and `--weight-entry` belong on the **entry** event; `--weight-exit` belongs on the **exit** event. Passing an exit-only flag to an entry event has no effect.
+3. **Confirm the agent received the values** — run with a single event manually and check the printed output. The tool result will include `cat weight X g` if the weight was received correctly.
+4. **Null is valid** — if a sensor malfunctions, simply omit its flag. The system records NULL and continues normally; derived values that depend on a missing reading will also be NULL.
 
 ### Orphan exit records accumulating
 

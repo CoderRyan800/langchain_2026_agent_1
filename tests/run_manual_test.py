@@ -18,6 +18,7 @@ Phases:
     5 — Sensor CLI subprocess          (2–3 GPT-4o calls, writes to production data/)
     6 — Reset and fresh-state check    (no LLM calls)
     7 — Retroactive recognition        (1–2 GPT-4o calls)
+    8 — Additional sensor data         (1–2 GPT-4o calls)
 
 Estimated API cost for a full run: ~$0.25–0.50
 Phase 5 writes a small number of records to the production data/litterbox.db.
@@ -739,8 +740,139 @@ def phase7() -> None:
         )
 
 
+# ── Phase 8: additional sensor data ──────────────────────────────────────────
+def phase8() -> None:
+    section("Phase 8 — Additional sensor data  (1–2 GPT-4o calls)")
+
+    import litterbox.embeddings as emb_mod
+    import shutil as _shutil
+    from litterbox.db import get_conn, init_db
+    from litterbox.health import build_health_prompt, HEALTH_PROMPT
+    from litterbox.tools import record_entry, record_exit
+
+    cat_a       = str(TEST_CAPTURES / "cat_a.jpg")
+    litter_clean = str(TEST_CAPTURES / "litter_clean.jpg")
+    litter_exit  = str(TEST_CAPTURES / "litter_exit_clean.jpg")
+
+    # Phase 6 wipes TEST_CHROMA; phase 7 uses chroma_phase7.  Use a fresh dir here.
+    chroma_p8 = TEST_DATA / "chroma_phase8"
+    if chroma_p8.exists():
+        _shutil.rmtree(chroma_p8)
+    emb_mod.CHROMA_PATH = chroma_p8
+    emb_mod._collection = None
+    init_db()
+
+    # ── 8.1 Schema verification ────────────────────────────────────────────────
+    with get_conn() as conn:
+        visit_cols = {row[1] for row in conn.execute("PRAGMA table_info(visits)")}
+        tables     = {row[0] for row in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )}
+    for col in ("weight_pre_g", "weight_entry_g", "weight_exit_g",
+                "cat_weight_g", "waste_weight_g",
+                "ammonia_peak_ppb", "methane_peak_ppb"):
+        check(col in visit_cols, f"8.1 — visits.{col} column exists")
+    check("visit_sensor_events" in tables,
+          "8.1 — visit_sensor_events table exists")
+
+    # ── 8.2 Health prompt includes sensor data ────────────────────────────────
+    prompt_with = build_health_prompt(
+        cat_weight_g=4200.0,
+        waste_weight_g=35.0,
+        ammonia_peak_ppb=180.0,
+        methane_peak_ppb=42.0,
+    )
+    check("4200" in prompt_with, "8.2a — cat weight appears in health prompt")
+    check("NH"   in prompt_with, "8.2b — ammonia label appears in health prompt")
+    check("CH"   in prompt_with, "8.2c — methane label appears in health prompt")
+    check("CONCERNS_PRESENT" in HEALTH_PROMPT,
+          "8.2d — baseline HEALTH_PROMPT (no sensors) still valid")
+
+    # ── 8.3 record_entry with full sensor data ────────────────────────────────
+    note("Calling record_entry with sensor data — GPT-4o call for cat ID…")
+    r = record_entry.invoke({
+        "image_path":       cat_a,
+        "weight_pre_g":     5800.0,
+        "weight_entry_g":   10050.0,
+        "ammonia_peak_ppb": 95.0,
+        "methane_peak_ppb": 18.0,
+    })
+    check("Visit" in r and "opened" in r, "8.3a — record_entry with sensors opens a visit", r)
+    check("4250"  in r or "4250.0" in r or "cat weight" in r.lower(),
+          "8.3b — cat weight appears in record_entry output", r)
+
+    with get_conn() as conn:
+        v = conn.execute(
+            "SELECT * FROM visits ORDER BY visit_id DESC LIMIT 1"
+        ).fetchone()
+    visit_id = v["visit_id"]
+
+    check(abs(v["weight_pre_g"]   - 5800.0)  < 0.1, "8.3c — weight_pre_g stored in visits")
+    check(abs(v["weight_entry_g"] - 10050.0) < 0.1, "8.3d — weight_entry_g stored in visits")
+    check(abs(v["cat_weight_g"]   - 4250.0)  < 0.1, "8.3e — cat_weight_g derived and stored")
+    check(abs(v["ammonia_peak_ppb"] - 95.0)  < 0.1, "8.3f — ammonia_peak_ppb stored in visits")
+    check(abs(v["methane_peak_ppb"] - 18.0)  < 0.1, "8.3g — methane_peak_ppb stored in visits")
+
+    with get_conn() as conn:
+        events = conn.execute(
+            "SELECT phase, sensor_type, value_numeric, unit "
+            "FROM visit_sensor_events WHERE visit_id = ? ORDER BY event_id",
+            (visit_id,),
+        ).fetchall()
+    sensor_types = [(e["phase"], e["sensor_type"]) for e in events]
+    check(("pre_entry", "weight") in sensor_types,
+          "8.3h — pre_entry weight event logged in visit_sensor_events")
+    check(("entry", "weight")   in sensor_types, "8.3i — entry weight event logged")
+    check(("entry", "ammonia")  in sensor_types, "8.3j — entry ammonia event logged")
+    check(("entry", "methane")  in sensor_types, "8.3k — entry methane event logged")
+
+    # ── 8.4 record_exit with sensor data (waste + peak gas) ───────────────────
+    note("Calling record_exit with sensor data — GPT-4o health analysis call…")
+    r = record_exit.invoke({
+        "image_path":       litter_exit,
+        "weight_exit_g":    5868.0,
+        "ammonia_peak_ppb": 310.0,
+        "methane_peak_ppb": 55.0,
+    })
+    check("Visit" in r and "closed" in r, "8.4a — record_exit with sensors closes the visit", r)
+
+    with get_conn() as conn:
+        v2 = conn.execute(
+            "SELECT * FROM visits WHERE visit_id = ?", (visit_id,)
+        ).fetchone()
+    check(abs(v2["weight_exit_g"]    - 5868.0) < 0.1, "8.4b — weight_exit_g stored")
+    check(abs(v2["waste_weight_g"]   - 68.0)   < 0.1, "8.4c — waste_weight_g derived (5868-5800)")
+    check(abs(v2["ammonia_peak_ppb"] - 310.0)  < 0.1, "8.4d — ammonia updated to exit peak (higher)")
+    check(abs(v2["methane_peak_ppb"] - 55.0)   < 0.1, "8.4e — methane updated to exit peak (higher)")
+    check(v2["health_notes"] is not None,              "8.4f — health_notes written after exit")
+
+    with get_conn() as conn:
+        exit_events = conn.execute(
+            "SELECT sensor_type FROM visit_sensor_events "
+            "WHERE visit_id = ? AND phase = 'exit'",
+            (visit_id,),
+        ).fetchall()
+    exit_types = {e["sensor_type"] for e in exit_events}
+    check("weight"  in exit_types, "8.4g — exit weight event logged")
+    check("ammonia" in exit_types, "8.4h — exit ammonia event logged")
+    check("methane" in exit_types, "8.4i — exit methane event logged")
+
+    # ── 8.5 Sensor-free visit still works (backward compat) ───────────────────
+    note("Calling record_entry with no sensor data — verifying backward compatibility…")
+    r2 = record_entry.invoke({"image_path": litter_clean})
+    check("Visit" in r2 and "opened" in r2,
+          "8.5a — record_entry without sensors still opens a visit", r2)
+    with get_conn() as conn:
+        v3 = conn.execute(
+            "SELECT * FROM visits ORDER BY visit_id DESC LIMIT 1"
+        ).fetchone()
+    check(v3["weight_pre_g"]     is None, "8.5b — weight_pre_g is NULL when not provided")
+    check(v3["cat_weight_g"]     is None, "8.5c — cat_weight_g is NULL when not provided")
+    check(v3["ammonia_peak_ppb"] is None, "8.5d — ammonia_peak_ppb is NULL when not provided")
+
+
 # ── Entry point ────────────────────────────────────────────────────────────────
-PHASES = {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5, 6: phase6, 7: phase7}
+PHASES = {1: phase1, 2: phase2, 3: phase3, 4: phase4, 5: phase5, 6: phase6, 7: phase7, 8: phase8}
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
@@ -755,6 +887,7 @@ if __name__ == "__main__":
             "  5 — Sensor CLI subprocess    (2–3 GPT-4o calls)\n"
             "  6 — Reset + fresh-state      (no LLM)\n"
             "  7 — Retroactive recognition  (1–2 GPT-4o calls)\n"
+            "  8 — Additional sensor data   (1–2 GPT-4o calls)\n"
         ),
     )
     parser.add_argument(
@@ -786,7 +919,7 @@ if __name__ == "__main__":
         if n in PHASES:
             PHASES[n]()
         else:
-            print(f"\n  Unknown phase number: {n}  (valid: 1–6)")
+            print(f"\n  Unknown phase number: {n}  (valid: 1–8)")
 
     print(f"\n{'═' * 66}")
     print(

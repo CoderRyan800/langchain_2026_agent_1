@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 
 from litterbox.db import get_conn, init_db
 from litterbox.embeddings import add_to_index, find_candidates, ID_THRESHOLD
-from litterbox.health import HEALTH_PROMPT, parse_health_response
+from litterbox.health import build_health_prompt, parse_health_response
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 IMAGES_DIR = PROJECT_ROOT / "images"
@@ -56,6 +56,39 @@ def _run_gpt4o_vision(prompt: str, *image_paths: str) -> str:
         content.append(_image_content_block(p))
     response = llm.invoke([HumanMessage(content=content)])
     return response.content
+
+
+def _log_sensor_events(
+    conn,
+    visit_id: int,
+    phase: str,
+    recorded_at: str,
+    weight_g: Optional[float] = None,
+    ammonia_peak_ppb: Optional[float] = None,
+    methane_peak_ppb: Optional[float] = None,
+) -> None:
+    """Insert rows into visit_sensor_events for any non-None readings."""
+    if weight_g is not None:
+        conn.execute(
+            """INSERT INTO visit_sensor_events
+               (visit_id, recorded_at, phase, sensor_type, value_numeric, unit)
+               VALUES (?, ?, ?, 'weight', ?, 'g')""",
+            (visit_id, recorded_at, phase, weight_g),
+        )
+    if ammonia_peak_ppb is not None:
+        conn.execute(
+            """INSERT INTO visit_sensor_events
+               (visit_id, recorded_at, phase, sensor_type, value_numeric, unit)
+               VALUES (?, ?, ?, 'ammonia', ?, 'ppb')""",
+            (visit_id, recorded_at, phase, ammonia_peak_ppb),
+        )
+    if methane_peak_ppb is not None:
+        conn.execute(
+            """INSERT INTO visit_sensor_events
+               (visit_id, recorded_at, phase, sensor_type, value_numeric, unit)
+               VALUES (?, ?, ?, 'methane', ?, 'ppb')""",
+            (visit_id, recorded_at, phase, methane_peak_ppb),
+        )
 
 
 def _identify_cat(
@@ -146,10 +179,23 @@ def register_cat_image(image_path: str, cat_name: str) -> str:
 
 
 @tool
-def record_entry(image_path: str) -> str:
+def record_entry(
+    image_path: str,
+    weight_pre_g: Optional[float] = None,
+    weight_entry_g: Optional[float] = None,
+    ammonia_peak_ppb: Optional[float] = None,
+    methane_peak_ppb: Optional[float] = None,
+) -> str:
     """Record a cat entering the litter box (called by the sensor system).
 
-    image_path: path to the entry photo captured by the camera.
+    image_path:       path to the entry photo captured by the camera.
+    weight_pre_g:     box + litter baseline weight before the cat entered, in grams
+                      (omit if no scale).
+    weight_entry_g:   box + litter + cat weight at the moment of entry, in grams
+                      (omit if no scale).
+    ammonia_peak_ppb: peak ammonia (NH3) sensor reading in ppb (omit if no gas sensor).
+    methane_peak_ppb: peak methane (CH4) sensor reading in ppb (omit if no gas sensor).
+
     Creates a new visit record and runs the cat identification pipeline.
     """
     init_db()
@@ -165,32 +211,72 @@ def record_entry(image_path: str) -> str:
 
     cat_id, cat_name, score, reasoning = _identify_cat(str(src))
 
+    cat_weight_g = None
+    if weight_pre_g is not None and weight_entry_g is not None:
+        cat_weight_g = weight_entry_g - weight_pre_g
+
     with get_conn() as conn:
         cur = conn.execute(
-            """INSERT INTO visits (entry_time, entry_image_path, tentative_cat_id, similarity_score)
-               VALUES (?, ?, ?, ?)""",
-            (now.isoformat(), stored_path, cat_id, score),
+            """INSERT INTO visits
+               (entry_time, entry_image_path, tentative_cat_id, similarity_score,
+                weight_pre_g, weight_entry_g, cat_weight_g,
+                ammonia_peak_ppb, methane_peak_ppb)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (now.isoformat(), stored_path, cat_id, score,
+             weight_pre_g, weight_entry_g, cat_weight_g,
+             ammonia_peak_ppb, methane_peak_ppb),
         )
         visit_id = cur.lastrowid
+
+        if weight_pre_g is not None:
+            _log_sensor_events(conn, visit_id, "pre_entry", now.isoformat(),
+                               weight_g=weight_pre_g)
+        if weight_entry_g is not None or ammonia_peak_ppb is not None or methane_peak_ppb is not None:
+            _log_sensor_events(conn, visit_id, "entry", now.isoformat(),
+                               weight_g=weight_entry_g,
+                               ammonia_peak_ppb=ammonia_peak_ppb,
+                               methane_peak_ppb=methane_peak_ppb)
 
     if cat_name:
         id_msg = f"Tentative ID: {cat_name} (similarity {score:.2f})."
     else:
         id_msg = f"Cat not identified (best score {score:.2f}). Flagged for human review."
 
+    sensor_parts = []
+    if cat_weight_g is not None:
+        sensor_parts.append(f"cat weight {cat_weight_g:.0f} g")
+    if ammonia_peak_ppb is not None:
+        sensor_parts.append(f"NH\u2083 {ammonia_peak_ppb:.0f} ppb")
+    if methane_peak_ppb is not None:
+        sensor_parts.append(f"CH\u2084 {methane_peak_ppb:.0f} ppb")
+    sensor_msg = f"Sensors: {', '.join(sensor_parts)}.\n" if sensor_parts else ""
+
     return (
         f"Visit #{visit_id} opened at {now.strftime('%Y-%m-%d %H:%M:%S')} UTC.\n"
         f"Entry image: {stored_path}\n"
         f"{id_msg}\n"
+        f"{sensor_msg}"
         f"Reasoning: {reasoning}"
     )
 
 
 @tool
-def record_exit(image_path: str) -> str:
+def record_exit(
+    image_path: str,
+    weight_exit_g: Optional[float] = None,
+    ammonia_peak_ppb: Optional[float] = None,
+    methane_peak_ppb: Optional[float] = None,
+) -> str:
     """Record a cat exiting the litter box and run a health analysis (called by the sensor system).
 
-    image_path: path to the exit photo captured by the camera.
+    image_path:       path to the exit photo captured by the camera.
+    weight_exit_g:    box + litter + waste weight after the cat has left, in grams
+                      (omit if no scale).
+    ammonia_peak_ppb: peak ammonia (NH3) reading during/after the visit in ppb
+                      (omit if no gas sensor).
+    methane_peak_ppb: peak methane (CH4) reading during/after the visit in ppb
+                      (omit if no gas sensor).
+
     Automatically associates with the most recent open visit.
     If no open visit exists, an orphan exit record is created with a warning.
     """
@@ -212,9 +298,12 @@ def record_exit(image_path: str) -> str:
 
         if open_visit is None:
             cur = conn.execute(
-                """INSERT INTO visits (exit_time, exit_image_path, is_orphan_exit)
-                   VALUES (?, ?, TRUE)""",
-                (now.isoformat(), stored_path),
+                """INSERT INTO visits
+                   (exit_time, exit_image_path, is_orphan_exit,
+                    weight_exit_g, ammonia_peak_ppb, methane_peak_ppb)
+                   VALUES (?, ?, TRUE, ?, ?, ?)""",
+                (now.isoformat(), stored_path,
+                 weight_exit_g, ammonia_peak_ppb, methane_peak_ppb),
             )
             orphan_id = cur.lastrowid
             return (
@@ -226,13 +315,60 @@ def record_exit(image_path: str) -> str:
         visit_id = open_visit["visit_id"]
         entry_image_abs = str(PROJECT_ROOT / open_visit["entry_image_path"])
 
-        conn.execute(
-            "UPDATE visits SET exit_time = ?, exit_image_path = ? WHERE visit_id = ?",
-            (now.isoformat(), stored_path, visit_id),
+        # Compute waste weight using the pre-entry baseline stored at entry time
+        weight_pre_g = open_visit["weight_pre_g"]
+        waste_weight_g = None
+        if weight_exit_g is not None and weight_pre_g is not None:
+            waste_weight_g = weight_exit_g - weight_pre_g
+
+        # For peak gas readings, take the higher of entry and exit readings
+        existing_ammonia = open_visit["ammonia_peak_ppb"]
+        final_ammonia = (
+            max(ammonia_peak_ppb, existing_ammonia)
+            if ammonia_peak_ppb is not None and existing_ammonia is not None
+            else (ammonia_peak_ppb if ammonia_peak_ppb is not None else existing_ammonia)
+        )
+        existing_methane = open_visit["methane_peak_ppb"]
+        final_methane = (
+            max(methane_peak_ppb, existing_methane)
+            if methane_peak_ppb is not None and existing_methane is not None
+            else (methane_peak_ppb if methane_peak_ppb is not None else existing_methane)
         )
 
-    # Health analysis — compare entry and exit images
-    health_text = _run_gpt4o_vision(HEALTH_PROMPT, entry_image_abs, str(src))
+        conn.execute(
+            """UPDATE visits
+               SET exit_time = ?, exit_image_path = ?,
+                   weight_exit_g = ?, waste_weight_g = ?,
+                   ammonia_peak_ppb = ?, methane_peak_ppb = ?
+               WHERE visit_id = ?""",
+            (now.isoformat(), stored_path,
+             weight_exit_g, waste_weight_g,
+             final_ammonia, final_methane,
+             visit_id),
+        )
+
+        if weight_exit_g is not None or ammonia_peak_ppb is not None or methane_peak_ppb is not None:
+            _log_sensor_events(conn, visit_id, "exit", now.isoformat(),
+                               weight_g=weight_exit_g,
+                               ammonia_peak_ppb=ammonia_peak_ppb,
+                               methane_peak_ppb=methane_peak_ppb)
+
+        # Fetch the complete visit row for the health prompt
+        visit_row = conn.execute(
+            "SELECT * FROM visits WHERE visit_id = ?", (visit_id,)
+        ).fetchone()
+
+    # Health analysis — compare entry and exit images, enriched with sensor data
+    health_prompt = build_health_prompt(
+        weight_pre_g=visit_row["weight_pre_g"],
+        weight_entry_g=visit_row["weight_entry_g"],
+        weight_exit_g=visit_row["weight_exit_g"],
+        cat_weight_g=visit_row["cat_weight_g"],
+        waste_weight_g=waste_weight_g,
+        ammonia_peak_ppb=visit_row["ammonia_peak_ppb"],
+        methane_peak_ppb=visit_row["methane_peak_ppb"],
+    )
+    health_text = _run_gpt4o_vision(health_prompt, entry_image_abs, str(src))
     is_anomalous, health_notes = parse_health_response(health_text)
 
     with get_conn() as conn:
@@ -250,9 +386,21 @@ def record_exit(image_path: str) -> str:
     cat_label = (tentative["name"] if tentative and tentative["name"] else "Unknown")
     flag = "⚠️  ANOMALY FLAGGED — veterinary review recommended" if is_anomalous else "No anomalies detected"
 
+    sensor_parts = []
+    if visit_row["cat_weight_g"] is not None:
+        sensor_parts.append(f"cat weight {visit_row['cat_weight_g']:.0f} g")
+    if waste_weight_g is not None:
+        sensor_parts.append(f"waste {waste_weight_g:.0f} g")
+    if visit_row["ammonia_peak_ppb"] is not None:
+        sensor_parts.append(f"NH\u2083 {visit_row['ammonia_peak_ppb']:.0f} ppb")
+    if visit_row["methane_peak_ppb"] is not None:
+        sensor_parts.append(f"CH\u2084 {visit_row['methane_peak_ppb']:.0f} ppb")
+    sensor_msg = f"Sensors: {', '.join(sensor_parts)}.\n" if sensor_parts else ""
+
     return (
         f"Visit #{visit_id} closed (tentative cat: {cat_label}).\n"
         f"Exit image: {stored_path}\n"
+        f"{sensor_msg}"
         f"Health: {flag}\n\n"
         f"{health_notes}"
     )

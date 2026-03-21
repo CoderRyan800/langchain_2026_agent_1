@@ -48,10 +48,14 @@ Your responsibilities:
    or the month they got the cat and use the first of that month.
 
 2. RECORD ENTRY EVENTS — When the sensor system notifies you of a litter box entry,
-   call record_entry(image_path) immediately.
+   call record_entry(image_path, ...) immediately, passing any sensor readings
+   (weight_pre_g, weight_entry_g, ammonia_peak_ppb, methane_peak_ppb) that appear
+   in the event message. Omit parameters that are not present in the message.
 
 3. RECORD EXIT EVENTS — When the sensor system notifies you of a litter box exit,
-   call record_exit(image_path) immediately.
+   call record_exit(image_path, ...) immediately, passing any sensor readings
+   (weight_exit_g, ammonia_peak_ppb, methane_peak_ppb) that appear in the event
+   message. Omit parameters that are not present in the message.
 
 4. CONFIRM IDENTITIES — Help the owner review unconfirmed visits and call
    confirm_identity(visit_id, cat_name) when they identify a cat.
@@ -80,7 +84,16 @@ def _print_last_ai_message(response: dict) -> None:
             print(f"Assistant: {message.content}\n")
 
 
-def run_sensor_event(event: str, image_path: str, checkpointer) -> None:
+def run_sensor_event(
+    event: str,
+    image_path: str,
+    checkpointer,
+    weight_pre_g=None,
+    weight_entry_g=None,
+    weight_exit_g=None,
+    ammonia_peak_ppb=None,
+    methane_peak_ppb=None,
+) -> None:
     """Handle a non-interactive sensor trigger (entry or exit)."""
     agent = create_agent(
         model="gpt-4o",
@@ -92,14 +105,32 @@ def run_sensor_event(event: str, image_path: str, checkpointer) -> None:
     config = {"configurable": {"thread_id": "sensor"}}
 
     if event == "entry":
+        sensor_parts = []
+        if weight_pre_g is not None:
+            sensor_parts.append(f"weight_pre_g={weight_pre_g}")
+        if weight_entry_g is not None:
+            sensor_parts.append(f"weight_entry_g={weight_entry_g}")
+        if ammonia_peak_ppb is not None:
+            sensor_parts.append(f"ammonia_peak_ppb={ammonia_peak_ppb}")
+        if methane_peak_ppb is not None:
+            sensor_parts.append(f"methane_peak_ppb={methane_peak_ppb}")
+        sensor_clause = f" Sensor readings: {', '.join(sensor_parts)}." if sensor_parts else ""
         prompt = (
             f"SENSOR EVENT: A cat has entered the litter box. "
-            f"Entry image path: {image_path}"
+            f"Entry image path: {image_path}{sensor_clause}"
         )
     else:
+        sensor_parts = []
+        if weight_exit_g is not None:
+            sensor_parts.append(f"weight_exit_g={weight_exit_g}")
+        if ammonia_peak_ppb is not None:
+            sensor_parts.append(f"ammonia_peak_ppb={ammonia_peak_ppb}")
+        if methane_peak_ppb is not None:
+            sensor_parts.append(f"methane_peak_ppb={methane_peak_ppb}")
+        sensor_clause = f" Sensor readings: {', '.join(sensor_parts)}." if sensor_parts else ""
         prompt = (
             f"SENSOR EVENT: A cat has exited the litter box. "
-            f"Exit image path: {image_path}"
+            f"Exit image path: {image_path}{sensor_clause}"
         )
 
     response = agent.invoke({"messages": [HumanMessage(content=prompt)]}, config=config)
@@ -166,6 +197,26 @@ if __name__ == "__main__":
         "--image",
         help="Path to the captured image (required for sensor events)"
     )
+    parser.add_argument(
+        "--weight-pre", type=float, metavar="G",
+        help="Box + litter baseline weight before cat enters (grams)"
+    )
+    parser.add_argument(
+        "--weight-entry", type=float, metavar="G",
+        help="Box + litter + cat weight at entry (grams)"
+    )
+    parser.add_argument(
+        "--weight-exit", type=float, metavar="G",
+        help="Box + litter + waste weight after cat leaves (grams)"
+    )
+    parser.add_argument(
+        "--ammonia-peak", type=float, metavar="PPB",
+        help="Peak ammonia (NH3) reading in ppb"
+    )
+    parser.add_argument(
+        "--methane-peak", type=float, metavar="PPB",
+        help="Peak methane (CH4) reading in ppb"
+    )
     args = parser.parse_args()
 
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -175,6 +226,13 @@ if __name__ == "__main__":
             if not args.image:
                 print("Error: --image is required for sensor events", file=sys.stderr)
                 sys.exit(1)
-            run_sensor_event(args.event, args.image, checkpointer)
+            run_sensor_event(
+                args.event, args.image, checkpointer,
+                weight_pre_g=args.weight_pre,
+                weight_entry_g=args.weight_entry,
+                weight_exit_g=args.weight_exit,
+                ammonia_peak_ppb=args.ammonia_peak,
+                methane_peak_ppb=args.methane_peak,
+            )
         else:
             run_interactive(checkpointer)

@@ -43,6 +43,39 @@ def init_db() -> None:
                 health_notes      TEXT,
                 is_anomalous      BOOLEAN DEFAULT FALSE,
                 is_orphan_exit    BOOLEAN DEFAULT FALSE,
+                weight_pre_g      REAL,
+                weight_entry_g    REAL,
+                weight_exit_g     REAL,
+                cat_weight_g      REAL,
+                waste_weight_g    REAL,
+                ammonia_peak_ppb  REAL,
+                methane_peak_ppb  REAL,
                 created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS visit_sensor_events (
+                event_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+                visit_id      INTEGER NOT NULL REFERENCES visits(visit_id),
+                recorded_at   TEXT NOT NULL,
+                phase         TEXT,
+                sensor_type   TEXT NOT NULL,
+                value_numeric REAL,
+                value_text    TEXT,
+                unit          TEXT
+            );
         """)
+
+        # Idempotent migration: add sensor columns to visits if this is an older DB
+        existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(visits)")}
+        new_cols = [
+            ("weight_pre_g",     "REAL"),
+            ("weight_entry_g",   "REAL"),
+            ("weight_exit_g",    "REAL"),
+            ("cat_weight_g",     "REAL"),
+            ("waste_weight_g",   "REAL"),
+            ("ammonia_peak_ppb", "REAL"),
+            ("methane_peak_ppb", "REAL"),
+        ]
+        for col, typ in new_cols:
+            if col not in existing_cols:
+                conn.execute(f"ALTER TABLE visits ADD COLUMN {col} {typ}")

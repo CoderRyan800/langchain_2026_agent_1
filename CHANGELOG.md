@@ -10,6 +10,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.5.0] — 2026-03-21
+
+### Added
+- **Sensor data ingestion** — each visit can now capture weight scale and gas sensor readings via new CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`
+- **Sensor summary columns on `visits`** — seven new nullable REAL columns: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived), `waste_weight_g` (derived), `ammonia_peak_ppb`, `methane_peak_ppb`
+- **`visit_sensor_events` table** — time-series log of every individual sensor reading per visit, with `phase` (pre_entry / entry / exit), `sensor_type`, `value_numeric`, `value_text`, and `unit`
+- **Derived weight computation** — `cat_weight_g = weight_entry_g − weight_pre_g`; `waste_weight_g = weight_exit_g − weight_pre_g`; computed in Python at write time
+- **Peak gas reconciliation** — `ammonia_peak_ppb` and `methane_peak_ppb` on `visits` hold `MAX(entry_reading, exit_reading)`; entry readings are fetched from `visit_sensor_events` before the exit UPDATE
+- **Health prompt enrichment** — `build_health_prompt(**sensor_kwargs)` inserts a structured sensor section into the GPT-4o prompt when any readings are present; `HEALTH_PROMPT` constant preserved for backward compatibility
+- **Idempotent DB migration** — `init_db()` uses `PRAGMA table_info(visits)` to add the seven sensor columns only when missing, enabling zero-downtime upgrades of existing deployments
+- **Comprehensive pytest suite** — 200 automated tests across six files: `test_db.py`, `test_health.py`, `test_tools_core.py`, `test_tools_sensor.py`, `test_integration.py`, `test_embeddings.py` (slow); run with `pytest -m "not slow"` for 180 fast tests in ~10 s
+- **`pytest.ini`** — registers the `slow` marker and sets default test path/verbosity
+- **`requirements-dev.txt`** — pins `pytest>=8.0.0` and `pytest-mock>=3.12.0`
+- **Phase 8 manual test** — 36 new checks covering schema verification, `build_health_prompt` with sensors, `record_entry`/`record_exit` with full sensor data, derived weights, `visit_sensor_events` logging, peak gas MAX logic, and backward compatibility
+
+### Changed
+- `record_entry()` accepts optional `weight_pre_g`, `weight_entry_g`, `ammonia_peak_ppb`, `methane_peak_ppb` parameters
+- `record_exit()` accepts optional `weight_exit_g`, `ammonia_peak_ppb`, `methane_peak_ppb` parameters; fetches entry gas readings to compute peak
+- `run_sensor_event()` in `litterbox_agent.py` extended with five sensor parameters; system prompt updated to pass CLI sensor values to the tools
+- Manual test runner updated from 7 to 8 phases
+
+---
+
 ## [0.4.0] — 2026-03-21
 
 ### Added

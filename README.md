@@ -47,17 +47,28 @@ python src/basic_agent.py
 # Litter box agent — interactive
 python src/litterbox_agent.py
 
-# Litter box agent — sensor-triggered
+# Litter box agent — sensor-triggered (image only)
 python src/litterbox_agent.py --event entry --image images/captures/entry.jpg
 python src/litterbox_agent.py --event exit  --image images/captures/exit.jpg
+
+# Litter box agent — sensor-triggered with weight and gas readings
+python src/litterbox_agent.py --event entry --image images/captures/entry.jpg \
+    --weight-pre 5400 --weight-entry 5900 --ammonia-peak 45 --methane-peak 30
+python src/litterbox_agent.py --event exit --image images/captures/exit.jpg \
+    --weight-exit 5680 --ammonia-peak 62 --methane-peak 41
 ```
 
 ### 4. Run the test suite
 
 ```bash
-python tests/run_manual_test.py          # full suite (~$0.25–0.50 in API calls)
-python tests/run_manual_test.py --phase 1  # storage/tools only — free
-python tests/run_manual_test.py --phase 7  # retroactive recognition only
+# Automated pytest (no LLM calls — fast)
+pytest -m "not slow"                          # 180 tests, ~10 s
+pytest -m slow                                # CLIP embedding tests (downloads ~350 MB model once)
+
+# Manual integration test runner (uses real LLM API calls)
+python tests/run_manual_test.py               # all 8 phases (~$0.25–0.50)
+python tests/run_manual_test.py --phase 1     # storage/schema only — free
+python tests/run_manual_test.py --phase 8     # sensor data ingestion only — free
 ```
 
 ---
@@ -85,6 +96,8 @@ You: Visit 7 is confirmed as Whiskers
 
 **Sensor-triggered** — called automatically by the camera system on entry and exit events. The agent runs without human input: it identifies the cat using a two-stage pipeline (local CLIP embeddings + GPT-4o visual confirmation), stores the visit record, and on exit runs a GPT-4o health analysis comparing the before and after images of the litter box.
 
+Optional sensor data (weight scale and ammonia/methane gas sensors) can be passed via CLI flags. When present, weight and gas readings are stored in the `visits` table as summary columns and in the `visit_sensor_events` time-series log. Cat weight and waste weight are derived automatically, peak gas readings are reconciled across entry and exit, and the health analysis prompt is enriched with all available sensor data.
+
 All health findings include a mandatory disclaimer and require veterinary review.
 
 ---
@@ -110,9 +123,16 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │       ├── db.py                # SQLite schema and query helpers
 │       ├── embeddings.py        # Local CLIP embeddings + Chroma vector search
 │       ├── health.py            # GPT-4o health analysis prompt and parser
-│       └── tools.py             # All 11 LangChain tools
+│       └── tools.py             # All 11 LangChain tools (record_entry/exit accept sensor data)
 ├── tests/
-│   └── run_manual_test.py       # Manual test runner (7 phases, 72 checks)
+│   ├── run_manual_test.py       # Manual integration test runner (8 phases, 80+ checks)
+│   ├── conftest.py              # Shared pytest fixtures and isolation helpers
+│   ├── test_db.py               # Schema, migration, and constraint tests
+│   ├── test_health.py           # Health prompt builder and response parser tests
+│   ├── test_tools_core.py       # Query and management tool tests
+│   ├── test_tools_sensor.py     # record_entry / record_exit sensor tests
+│   ├── test_integration.py      # Full visit lifecycle integration tests
+│   └── test_embeddings.py       # CLIP embedding tests (slow — loads model)
 ├── docs/
 │   ├── USER_GUIDE.md            # Full user guide
 │   └── TESTING.md               # Test procedure and baseline results
@@ -127,5 +147,7 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 ├── agent_memory.db              # Bob's conversation store (gitignored)
 ├── .env                         # API keys (gitignored)
 ├── .gitignore
-└── requirements.txt
+├── pytest.ini                   # Test discovery config and slow marker
+├── requirements.txt
+└── requirements-dev.txt         # Adds pytest and pytest-mock
 ```

@@ -453,6 +453,112 @@ def get_visit_images(visit_id: int) -> str:
 
 
 @tool
+def retroactive_recognition(cat_name: str, since_date: str) -> str:
+    """Review unknown visits since a given date and retroactively identify those
+    that belong to a newly registered cat.
+
+    cat_name:   the cat's registered name (must already be in the database).
+    since_date: date in YYYY-MM-DD format — the owner's acquisition date for
+                this cat. Only visits on or after this date are reviewed.
+
+    Runs the full two-stage CLIP + GPT-4o pipeline on every unknown visit in
+    that window. Visits confirmed as this cat are marked is_confirmed=TRUE and
+    assigned both tentative_cat_id and confirmed_cat_id.
+    Returns a plain-text summary of all reviewed visits and their outcomes.
+    """
+    init_db()
+    from datetime import date as _date
+
+    # Validate date format
+    try:
+        _date.fromisoformat(since_date)
+    except ValueError:
+        return f"Error: '{since_date}' is not a valid date. Use YYYY-MM-DD format."
+
+    with get_conn() as conn:
+        cat = conn.execute(
+            "SELECT cat_id FROM cats WHERE name = ?", (cat_name,)
+        ).fetchone()
+        if not cat:
+            return (
+                f"Error: no cat named '{cat_name}' found. "
+                f"Register them first with register_cat_image."
+            )
+        cat_id = cat["cat_id"]
+
+        unknown_visits = conn.execute(
+            """SELECT visit_id, entry_image_path, entry_time
+               FROM visits
+               WHERE tentative_cat_id IS NULL
+                 AND is_confirmed = FALSE
+                 AND is_orphan_exit = FALSE
+                 AND entry_image_path IS NOT NULL
+                 AND DATE(entry_time) >= ?
+               ORDER BY entry_time""",
+            (since_date,),
+        ).fetchall()
+
+    if not unknown_visits:
+        return (
+            f"No unknown visits found on or after {since_date}. "
+            f"Nothing to retroactively review for '{cat_name}'."
+        )
+
+    matched, skipped, unmatched = [], [], []
+
+    for row in unknown_visits:
+        visit_id = row["visit_id"]
+        entry_image_abs = str(_abs(row["entry_image_path"]))
+
+        if not Path(entry_image_abs).exists():
+            skipped.append((visit_id, row["entry_time"], "image file missing"))
+            continue
+
+        identified_cat_id, identified_name, score, reasoning = _identify_cat(entry_image_abs)
+
+        if identified_cat_id == cat_id:
+            with get_conn() as conn:
+                conn.execute(
+                    """UPDATE visits
+                       SET tentative_cat_id = ?,
+                           confirmed_cat_id  = ?,
+                           is_confirmed      = TRUE,
+                           similarity_score  = ?
+                       WHERE visit_id = ?""",
+                    (cat_id, cat_id, score, visit_id),
+                )
+            matched.append((visit_id, row["entry_time"], score))
+        else:
+            unmatched.append((visit_id, row["entry_time"], identified_name, score))
+
+    lines = [
+        f"Retroactive recognition for '{cat_name}' since {since_date}:",
+        f"  Visits reviewed : {len(unknown_visits)}",
+        f"  Confirmed match : {len(matched)}",
+        f"  No match        : {len(unmatched)}",
+        f"  Skipped (error) : {len(skipped)}",
+    ]
+
+    if matched:
+        lines.append("\nMatched visits (now confirmed):")
+        for vid, ts, sim in matched:
+            lines.append(f"  #{vid} at {ts}  sim={sim:.2f}")
+
+    if unmatched:
+        lines.append("\nVisits that did not match:")
+        for vid, ts, other_name, sim in unmatched:
+            best = f"best candidate '{other_name}'" if other_name else "no candidate"
+            lines.append(f"  #{vid} at {ts}  {best} sim={sim:.2f}")
+
+    if skipped:
+        lines.append("\nSkipped visits:")
+        for vid, ts, reason in skipped:
+            lines.append(f"  #{vid} at {ts}  reason: {reason}")
+
+    return "\n".join(lines)
+
+
+@tool
 def list_cats() -> str:
     """List all registered cats and their reference image counts."""
     init_db()
@@ -482,6 +588,7 @@ ALL_TOOLS = [
     record_entry,
     record_exit,
     confirm_identity,
+    retroactive_recognition,
     get_visits_by_date,
     get_visits_by_cat,
     get_anomalous_visits,

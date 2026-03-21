@@ -42,13 +42,13 @@ Bob supports `/UPLOAD /path/to/file` for images/audio and `/STOP` to quit.
 ## Tests
 
 ```bash
-python tests/run_manual_test.py                    # all 6 phases (~$0.25–0.50)
+python tests/run_manual_test.py                    # all 7 phases (~$0.25–0.50)
 python tests/run_manual_test.py --phase 1          # phase 1 only (free, no LLM calls)
 python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 ```
 
-Phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
+Phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
 
 ## Architecture
 
@@ -63,7 +63,7 @@ Phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confi
 - **`src/litterbox/db.py`** — SQLite schema (cats, cat_images, visits); `init_db()` is idempotent
 - **`src/litterbox/embeddings.py`** — CLIP (`clip-ViT-B-32`, downloads ~350 MB on first run) + Chroma vector search; `ID_THRESHOLD = 0.82`
 - **`src/litterbox/health.py`** — GPT-4o health analysis prompt and `parse_health_response()`
-- **`src/litterbox/tools.py`** — 10 `@tool` functions; docstrings auto-generate LangChain tool descriptions
+- **`src/litterbox/tools.py`** — 11 `@tool` functions; docstrings auto-generate LangChain tool descriptions
 
 ### Two-Stage Cat ID Pipeline
 1. **CLIP** (local, free): embeds entry image, queries Chroma for top candidates
@@ -82,4 +82,6 @@ If no candidate passes both stages, the visit is recorded unconfirmed for human 
 ### Key Implementation Details
 - `_abs()` in `tools.py` handles both absolute and project-relative paths
 - Orphan exits (no open visit): `record_exit()` creates a flagged orphan record rather than failing
+- `retroactive_recognition()` scans unknown visits since a given date and re-runs the full CLIP+GPT-4o pipeline; called automatically by the agent after every new cat registration
 - Test suite patches module-level constants (`DB_PATH`, `CHROMA_PATH`, `IMAGES_DIR`) for isolation
+- Phase 7 uses a dedicated Chroma subdirectory (`chroma_phase7/`) to avoid file-lock conflicts with Phase 6's wipe

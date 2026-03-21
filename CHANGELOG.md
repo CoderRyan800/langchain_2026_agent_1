@@ -10,6 +10,20 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.4.0] — 2026-03-21
+
+### Added
+- **Retroactive recognition** (`retroactive_recognition` tool) — after a new cat is registered, the agent automatically asks for the cat's acquisition date and re-runs the full CLIP + GPT-4o identification pipeline over all unknown visits on or after that date, confirming any that match
+- **Agent system prompt updated** — the litter box agent now always prompts for an acquisition date after registration and calls `retroactive_recognition` automatically; owners can also trigger it directly
+- **Phase 7 test suite** — 12 new checks covering invalid date, unknown cat, empty date range, orphan-exit exclusion, tentative-ID exclusion, missing-image skip, and a live CLIP+GPT-4o retroactive match
+- **Test image fallback** — `prepare_images()` falls back to a local production reference image when the Wikimedia download is rate-limited, keeping the test suite runnable offline
+
+### Changed
+- Tool count increased from 10 to 11 (`ALL_TOOLS` now includes `retroactive_recognition`)
+- Test runner updated from 6 to 7 phases; total check count raised from 62 to 72
+
+---
+
 ## [0.3.0] — 2026-03-14
 
 ### Added

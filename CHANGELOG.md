@@ -10,6 +10,29 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [0.6.0] — 2026-03-21
+
+### Added
+- **Simulation harness** (`simulator/`) — drives the production agent with realistic sensor noise and real cat photos; produces a structured Markdown accuracy report
+- **`simulator/cat_pictures/`** — 19 real photos of Anna (4), Luna (5), Marina (4), Natasha (6); photo[0] per cat is the registration reference
+- **`simulator/sim_config.py`** — all tunable constants: cat weights, noise parameters, visit quotas, random seed, placeholder image specs
+- **`simulator/sensor_model.py`** — Gaussian weight noise (±20–30 g), uniform gas readings with configurable null dropout (10% NH₃, 15% CH₄); anomalous events push gas into elevated range (150–300 ppb NH₃, 80–180 ppb CH₄)
+- **`simulator/schedule_generator.py`** — reproducible 20-visit schedule across 7 days using realistic time blocks; 3 randomly seeded anomalous events per run
+- **`simulator/run_simulation.py`** — registers cats via `register_cat_image`, replays events via direct `record_entry`/`record_exit` tool calls, writes `sim_ground_truth.json`; `--seed`, `--no-register`, `--report-only` flags
+- **`simulator/sim_report.py`** — joins ground-truth JSON with live DB; computes and renders identity accuracy, weight error, waste weight, sensor coverage, and anomaly detection metrics
+- **`simulator/assets/`** — beige placeholder JPEG images (clean/used box) generated on first run
+- **`simulator/sim_ground_truth.json`** — per-event log from baseline run (seed=42)
+- **`simulator/simulation_report.md`** — baseline accuracy report (70% ID accuracy, <33 g weight error)
+- **`simulator/README.md`** — usage guide, sensor noise model reference, file structure
+
+### Baseline simulation results (seed=42, 20 visits)
+- Identity accuracy: 70% overall; Anna 100%, Marina 80%, Luna 83%, Natasha 20%
+- Weight error: Anna ±21 g, Marina ±23 g, Luna ±32 g, Natasha ±13 g
+- Sensor coverage: 90% NH₃, 85% CH₄
+- Null sensor handling: all events completed without errors
+
+---
+
 ## [0.5.0] — 2026-03-21
 
 ### Added

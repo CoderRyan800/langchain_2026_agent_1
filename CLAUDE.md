@@ -101,6 +101,28 @@ CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-p
 - `data/chroma/` — CLIP vector index
 - `images/cats/`, `images/visits/`, `images/captures/` — image storage
 
+### Simulator (`simulator/`)
+A self-contained simulation harness that drives the production agent with realistic sensor data and real cat photographs (Anna, Luna, Marina, Natasha).
+
+```bash
+python simulator/run_simulation.py               # full run: register + 20 visits + report
+python simulator/run_simulation.py --seed 123    # different random seed
+python simulator/run_simulation.py --no-register # skip registration (cats already in DB)
+python simulator/run_simulation.py --report-only # regenerate report from existing JSON
+```
+
+- **`simulator/sim_config.py`** — cat weights, noise params, visit quotas, random seed
+- **`simulator/sensor_model.py`** — Gaussian weight noise + uniform gas readings with null dropout
+- **`simulator/schedule_generator.py`** — reproducible 20-visit schedule; 3 random anomalies seeded
+- **`simulator/run_simulation.py`** — registers cats via `register_cat_image`, replays events via direct `record_entry`/`record_exit` tool calls, writes `sim_ground_truth.json`
+- **`simulator/sim_report.py`** — joins ground truth with live DB; produces `simulation_report.md`
+- **`simulator/cat_pictures/`** — 19 real photos (4–6 per cat); photo[0] per cat is the reference
+- **`simulator/assets/`** — generated placeholder box images (beige solid-colour JPEGs)
+
+Outputs: `simulator/sim_ground_truth.json` (per-event ground truth), `simulator/simulation_report.md` (identity accuracy, weight accuracy, sensor coverage, anomaly detection).
+
+Baseline result (seed=42): 70% identity accuracy (Anna 100%, Marina 80%, Luna 83%, Natasha 20%); weight error <33 g across all cats; sensor coverage 90%/85% NH₃/CH₄.
+
 ### Key Implementation Details
 - `_abs()` in `tools.py` handles both absolute and project-relative paths
 - Orphan exits (no open visit): `record_exit()` creates a flagged orphan record rather than failing; sensor data is stored on orphan rows too

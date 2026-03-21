@@ -102,6 +102,33 @@ All health findings include a mandatory disclaimer and require veterinary review
 
 ---
 
+## Simulator
+
+A self-contained harness that drives the production agent with realistic sensor noise and real cat photos, then produces a Markdown accuracy report.
+
+```bash
+conda activate langchain_env_2026_1
+python simulator/run_simulation.py               # full run (~$0.50–1.50 in API calls)
+python simulator/run_simulation.py --no-register # re-run without re-registering cats
+python simulator/run_simulation.py --report-only # regenerate report only
+```
+
+Outputs written to `simulator/sim_ground_truth.json` and `simulator/simulation_report.md`. See [`simulator/README.md`](simulator/README.md) for full details.
+
+**Baseline results (seed=42, 20 visits):**
+
+| Metric | Result |
+|--------|--------|
+| Identity accuracy | 70% (14/20) |
+| Anna | 4/4 correct |
+| Marina | 4/5 correct |
+| Luna | 5/6 correct |
+| Natasha | 1/5 correct — needs better reference photo |
+| Weight error | <33 g mean across all cats |
+| Sensor coverage | 90% NH₃, 85% CH₄ (null dropout working) |
+
+---
+
 ## How memory works
 
 Both agents use LangGraph's `SqliteSaver` checkpointer to persist the full conversation state after every invocation. On restart, the latest checkpoint for the configured `thread_id` is loaded automatically.
@@ -133,6 +160,17 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │   ├── test_tools_sensor.py     # record_entry / record_exit sensor tests
 │   ├── test_integration.py      # Full visit lifecycle integration tests
 │   └── test_embeddings.py       # CLIP embedding tests (slow — loads model)
+├── simulator/
+│   ├── README.md                # Simulator usage guide
+│   ├── sim_config.py            # Cat weights, noise params, schedule config
+│   ├── sensor_model.py          # Gaussian weight + gas sensor noise model
+│   ├── schedule_generator.py    # Reproducible visit schedule builder
+│   ├── run_simulation.py        # Main entry point
+│   ├── sim_report.py            # Markdown report generator
+│   ├── cat_pictures/            # Real photos: Anna, Luna, Marina, Natasha
+│   ├── assets/                  # Generated placeholder box images
+│   ├── sim_ground_truth.json    # Per-event ground truth from last run
+│   └── simulation_report.md     # Accuracy report from last run
 ├── docs/
 │   ├── USER_GUIDE.md            # Full user guide
 │   └── TESTING.md               # Test procedure and baseline results

@@ -1,0 +1,49 @@
+Branch feature/auto_update_on_cat_registration will be used to allow the system to automatically update
+all of the unknown kitty visits every time a new kitty is registered.  In the last test we had to
+manually update each visit which was very tedious and should have been automated.
+
+21 MARCH 2026
+
+1. Kitty detection will be via polling loop using scale and/or camera.
+    a. Probably scale initially.
+2. Data buffer will contain some previous data so we can get the pre-weight in addition
+to the current weight.
+3. Entry event on significant increase in weight.  Exit event on significant drop.
+    a. Should set thresholds.
+4. Use BOTH the kitty weight AND the camera image to reason about identity.
+5. Decide on how to call the agent on event.
+    a. Python function call? (let's use this!)
+    b. CLI method (current method!)
+    c. REST API?
+    d. Other?
+6. Based on Python function call, we should create a Python API that other applications use.
+    a. And we need a setup.py and need to make this into a package that the developer can 
+    install and then call.
+    b. And then write the test scripts in Python for demonstration purposes.
+7. Now regarding chip reading, even if you can't decrypt the chip, as long as the chip 
+reader output is unique for each kitty and repeatable even if you cannot decrypt, you still
+have a unique identifier!
+    a. So add chip ID string capability!
+    b. This would be gold standard.
+
+4 APRIL 2026
+
+1. Successful litterbox simulation using actual kitty images.
+    a. We need to plan on real world testing at this stage.
+    b. Al recommends starting with weight only for simplicity.
+        (1) I must confirm this with Al today to be sure I am remembering it 
+        correctly because I could be misremembering things here!
+2. Need plans going forward.
+    a. Present system can accomodate weight sensing, image sensing, ammonia, and 
+    methane.
+    b. Should adjust the present system to add chip ID.
+        (1) Even if scrambled as long as it's unique to each cat it's good enough.
+        (2) Should be taken as definitive.
+            (a) But what if two cats are near the box at the same time?
+            Maybe not so definitive?  I dont' know...
+3. Question: When does hardware testing begin?
+4. Ryan will merge present system to main branch in his repo.
+5. Next week (tentative):
+    a. Pour through the data.
+    b. Work out how to get an initial operating run with hardware going.
+    

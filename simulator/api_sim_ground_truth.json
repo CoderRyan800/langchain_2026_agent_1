@@ -1,0 +1,1132 @@
+{
+  "seed": 42,
+  "cats": {
+    "Anna": {
+      "body_mass_g": 3200,
+      "registration_image": "images/cats/anna/001_c25e6c.jpg",
+      "pool_size": 5,
+      "pool": [
+        "images/cats/anna/001_c25e6c.jpg",
+        "images/cats/anna/IMG_7988.jpeg",
+        "images/cats/anna/IMG_7989.jpeg",
+        "images/cats/anna/IMG_7990.jpeg",
+        "images/cats/anna/IMG_7991.jpeg"
+      ]
+    },
+    "Marina": {
+      "body_mass_g": 4000,
+      "registration_image": "images/cats/marina/001_aad380.jpg",
+      "pool_size": 5,
+      "pool": [
+        "images/cats/marina/001_aad380.jpg",
+        "images/cats/marina/IMG_7175.jpeg",
+        "images/cats/marina/IMG_7193.jpeg",
+        "images/cats/marina/IMG_7311.jpeg",
+        "images/cats/marina/IMG_7490.jpeg"
+      ]
+    },
+    "Luna": {
+      "body_mass_g": 5500,
+      "registration_image": "images/cats/luna/001_a150db.jpg",
+      "pool_size": 6,
+      "pool": [
+        "images/cats/luna/001_a150db.jpg",
+        "images/cats/luna/IMG_7633.jpeg",
+        "images/cats/luna/IMG_7992 2.jpeg",
+        "images/cats/luna/IMG_7993 2.jpeg",
+        "images/cats/luna/IMG_7994.jpeg",
+        "images/cats/luna/IMG_7996.jpeg"
+      ]
+    },
+    "Natasha": {
+      "body_mass_g": 5000,
+      "registration_image": "images/cats/natasha/001_4c58dd.jpg",
+      "pool_size": 7,
+      "pool": [
+        "images/cats/natasha/001_4c58dd.jpg",
+        "images/cats/natasha/IMG_7998.jpeg",
+        "images/cats/natasha/IMG_7999.jpeg",
+        "images/cats/natasha/IMG_8001.jpeg",
+        "images/cats/natasha/IMG_8002.jpeg",
+        "images/cats/natasha/IMG_8003.jpeg",
+        "images/cats/natasha/IMG_8004.jpeg"
+      ]
+    },
+    "Whiskers": {
+      "body_mass_g": 6000,
+      "registration_image": "images/cats/whiskers/001_b0c0d4.jpg",
+      "pool_size": 3,
+      "pool": [
+        "images/cats/whiskers/001_b0c0d4.jpg",
+        "images/cats/whiskers/002_32dbc2.jpg",
+        "images/cats/whiskers/002_b2e960.jpg"
+      ]
+    }
+  },
+  "anomalous_visits": [
+    {
+      "cat": "Anna",
+      "visit_index_0based": 7
+    },
+    {
+      "cat": "Luna",
+      "visit_index_0based": 2
+    },
+    {
+      "cat": "Whiskers",
+      "visit_index_0based": 4
+    }
+  ],
+  "visits": [
+    {
+      "sequence": 1,
+      "cat_name": "Luna",
+      "visit_num": 1,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/001_a150db.jpg",
+      "visit_image_name": "001_a150db.jpg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2024,
+        "weight_entry_g": 7519,
+        "weight_exit_g": 2039,
+        "waste_g_true": 41,
+        "ammonia_peak_ppb": 14.1,
+        "methane_peak_ppb": 21.1
+      },
+      "entry_result": "Visit #1 opened at 2026-04-04 23:20:24 UTC.\nEntry image: api_sim_images/visits/2026-04-04/2b3d7c96_entry.jpg\nTentative ID: Luna (similarity 1.00).\nSensors: cat weight 5495 g, NH\u2083 14 ppb, CH\u2084 21 ppb.\nReasoning: YES. Both images depict the same cat, with the same appearance, posture, and surroundings.",
+      "exit_result": "Visit #1 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/241c801f_exit.jpg\nSensors: cat weight 5495 g, waste 15 g, NH\u2083 14 ppb, CH\u2084 21 ppb.\nHealth: No anomalies detected\n\nI'm sorry, the images provided are not of a litter box. Please provide the images for assessment."
+    },
+    {
+      "sequence": 2,
+      "cat_name": "Luna",
+      "visit_num": 5,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7633.jpeg",
+      "visit_image_name": "IMG_7633.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2005,
+        "weight_entry_g": 7508,
+        "weight_exit_g": 2049,
+        "waste_g_true": 60,
+        "ammonia_peak_ppb": 31.7,
+        "methane_peak_ppb": 21.6
+      },
+      "entry_result": "Visit #2 opened at 2026-04-04 23:20:32 UTC.\nEntry image: api_sim_images/visits/2026-04-04/d1c56c9d_entry.jpg\nTentative ID: Luna (similarity 1.00).\nSensors: cat weight 5503 g, NH\u2083 32 ppb, CH\u2084 22 ppb.\nReasoning: YES. The images show identical features, indicating the same cat is depicted in both.",
+      "exit_result": "Visit #2 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/db452928_exit.jpg\nSensors: cat weight 5503 g, waste 44 g, NH\u2083 32 ppb, CH\u2084 22 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I'm unable to analyze these images as they don't show the litter box before and after the cat's visit. Please provide the correct images for assessment."
+    },
+    {
+      "sequence": 3,
+      "cat_name": "Luna",
+      "visit_num": 8,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7996.jpeg",
+      "visit_image_name": "IMG_7996.jpeg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.87,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2021,
+        "weight_entry_g": 7546,
+        "weight_exit_g": 2094,
+        "waste_g_true": 61,
+        "ammonia_peak_ppb": 52.4,
+        "methane_peak_ppb": 9.9
+      },
+      "entry_result": "Visit #3 opened at 2026-04-04 23:20:40 UTC.\nEntry image: api_sim_images/visits/2026-04-04/3b609bcb_entry.jpg\nCat not identified (best score 0.87). Flagged for human review.\nSensors: cat weight 5525 g, NH\u2083 52 ppb, CH\u2084 10 ppb.\nReasoning: Could not confirm identity. Best candidate 'Marina' scored 0.87 (threshold 0.82).",
+      "exit_result": "Visit #3 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/208747fe_exit.jpg\nSensors: cat weight 5525 g, waste 73 g, NH\u2083 52 ppb, CH\u2084 10 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I cannot analyze the contents of the litter box images. To ensure accurate evaluation, it\u2019s best to consult with a licensed veterinarian with the images."
+    },
+    {
+      "sequence": 4,
+      "cat_name": "Luna",
+      "visit_num": 7,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7633.jpeg",
+      "visit_image_name": "IMG_7633.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2024,
+        "weight_entry_g": 7549,
+        "weight_exit_g": 2052,
+        "waste_g_true": 62,
+        "ammonia_peak_ppb": 8.0,
+        "methane_peak_ppb": 26.1
+      },
+      "entry_result": "Visit #4 opened at 2026-04-04 23:20:57 UTC.\nEntry image: api_sim_images/visits/2026-04-04/9502423d_entry.jpg\nTentative ID: Luna (similarity 1.00).\nSensors: cat weight 5525 g, NH\u2083 8 ppb, CH\u2084 26 ppb.\nReasoning: YES. The images are identical, showing the same black cat in the same position with the same background items.",
+      "exit_result": "Visit #4 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/3aa6425e_exit.jpg\nSensors: cat weight 5525 g, waste 28 g, NH\u2083 8 ppb, CH\u2084 26 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I cannot compare images or recognize their content. Please describe the differences between the two images."
+    },
+    {
+      "sequence": 5,
+      "cat_name": "Natasha",
+      "visit_num": 4,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8003.jpeg",
+      "visit_image_name": "IMG_8003.jpeg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.9,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2050,
+        "weight_entry_g": 7046,
+        "weight_exit_g": 2129,
+        "waste_g_true": 73,
+        "ammonia_peak_ppb": 55.6,
+        "methane_peak_ppb": 21.2
+      },
+      "entry_result": "Visit #5 opened at 2026-04-04 23:21:05 UTC.\nEntry image: api_sim_images/visits/2026-04-04/3df5832b_entry.jpg\nCat not identified (best score 0.90). Flagged for human review.\nSensors: cat weight 4996 g, NH\u2083 56 ppb, CH\u2084 21 ppb.\nReasoning: Could not confirm identity. Best candidate 'Marina' scored 0.90 (threshold 0.82).",
+      "exit_result": "Visit #5 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/8efd3154_exit.jpg\nSensors: cat weight 4996 g, waste 79 g, NH\u2083 56 ppb, CH\u2084 21 ppb.\nHealth: No anomalies detected\n\nI'm unable to analyze the litter box images provided. Please upload the correct images showing the litter box before and after the cat's use.\n\n\u26a0\ufe0f This analysis is preliminary and must be reviewed by a licensed veterinarian before any medical decisions are made."
+    },
+    {
+      "sequence": 6,
+      "cat_name": "Anna",
+      "visit_num": 8,
+      "is_anomalous": true,
+      "visit_image_path": "images/cats/anna/IMG_7989.jpeg",
+      "visit_image_name": "IMG_7989.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2015,
+        "weight_entry_g": 5221,
+        "weight_exit_g": 2144,
+        "waste_g_true": 114,
+        "ammonia_peak_ppb": 279.6,
+        "methane_peak_ppb": 140.9
+      },
+      "entry_result": "Visit #6 opened at 2026-04-04 23:21:22 UTC.\nEntry image: api_sim_images/visits/2026-04-04/15f49a89_entry.jpg\nTentative ID: Anna (similarity 0.96).\nSensors: cat weight 3206 g, NH\u2083 280 ppb, CH\u2084 141 ppb.\nReasoning: YES. The cats in both images have similar black and white fur patterns, notably around the face and ears, and the same collar, suggesting they are the same cat.",
+      "exit_result": "Visit #6 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/e0bc054e_exit.jpg\nSensors: cat weight 3206 g, waste 129 g, NH\u2083 280 ppb, CH\u2084 141 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I need more information to perform the analysis as the relevant images showing the litter box before and after the cat's visit are not provided. Could you please upload the correct images?"
+    },
+    {
+      "sequence": 7,
+      "cat_name": "Anna",
+      "visit_num": 3,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7991.jpeg",
+      "visit_image_name": "IMG_7991.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1981,
+        "weight_entry_g": 5197,
+        "weight_exit_g": 2059,
+        "waste_g_true": 55,
+        "ammonia_peak_ppb": 13.8,
+        "methane_peak_ppb": 16.9
+      },
+      "entry_result": "Visit #7 opened at 2026-04-04 23:21:29 UTC.\nEntry image: api_sim_images/visits/2026-04-04/d37e41bd_entry.jpg\nTentative ID: Anna (similarity 0.95).\nSensors: cat weight 3216 g, NH\u2083 14 ppb, CH\u2084 17 ppb.\nReasoning: YES\n\nThe cat in Image 1 and Image 2 has similar markings, such as the white and black fur pattern and distinct facial features like the pink nose and black spot near its mouth.",
+      "exit_result": "Visit #7 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/7c4b13f3_exit.jpg\nSensors: cat weight 3216 g, waste 78 g, NH\u2083 14 ppb, CH\u2084 17 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with this request."
+    },
+    {
+      "sequence": 8,
+      "cat_name": "Marina",
+      "visit_num": 6,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7490.jpeg",
+      "visit_image_name": "IMG_7490.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1998,
+        "weight_entry_g": 5998,
+        "weight_exit_g": 2025,
+        "waste_g_true": 61,
+        "ammonia_peak_ppb": 21.1,
+        "methane_peak_ppb": 6.3
+      },
+      "entry_result": "Visit #8 opened at 2026-04-04 23:21:36 UTC.\nEntry image: api_sim_images/visits/2026-04-04/2d8b121c_entry.jpg\nTentative ID: Anna (similarity 0.90).\nSensors: cat weight 4000 g, NH\u2083 21 ppb, CH\u2084 6 ppb.\nReasoning: YES, both images show a black and white cat with similar fur patterns, a black collar, and a similar facial marking.",
+      "exit_result": "Visit #8 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/3816f1c5_exit.jpg\nSensors: cat weight 4000 g, waste 27 g, NH\u2083 21 ppb, CH\u2084 6 ppb.\nHealth: No anomalies detected\n\nI'm unable to assist with the litter box assessment because the content provided doesn't contain images of the litter box. Please try uploading clear images of the litter box area before and after the cat's use for evaluation."
+    },
+    {
+      "sequence": 9,
+      "cat_name": "Natasha",
+      "visit_num": 6,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8002.jpeg",
+      "visit_image_name": "IMG_8002.jpeg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.8,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1983,
+        "weight_entry_g": 6984,
+        "weight_exit_g": 2096,
+        "waste_g_true": 86,
+        "ammonia_peak_ppb": 28.1,
+        "methane_peak_ppb": 23.3
+      },
+      "entry_result": "Visit #9 opened at 2026-04-04 23:21:48 UTC.\nEntry image: api_sim_images/visits/2026-04-04/29dc08ba_entry.jpg\nCat not identified (best score 0.80). Flagged for human review.\nSensors: cat weight 5001 g, NH\u2083 28 ppb, CH\u2084 23 ppb.\nReasoning: Could not confirm identity. Best candidate 'Luna' scored 0.80 (threshold 0.82).",
+      "exit_result": "Visit #9 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/ef8dbed6_exit.jpg\nSensors: cat weight 5001 g, waste 113 g, NH\u2083 28 ppb, CH\u2084 23 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't analyze these images. They both appear to be incorrect and unrelated to the description given for a litter box analysis. Please provide the correct images for evaluation."
+    },
+    {
+      "sequence": 10,
+      "cat_name": "Anna",
+      "visit_num": 7,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7989.jpeg",
+      "visit_image_name": "IMG_7989.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2039,
+        "weight_entry_g": 5234,
+        "weight_exit_g": 2131,
+        "waste_g_true": 108,
+        "ammonia_peak_ppb": 50.9,
+        "methane_peak_ppb": 6.5
+      },
+      "entry_result": "Visit #10 opened at 2026-04-04 23:21:51 UTC.\nEntry image: api_sim_images/visits/2026-04-04/875c3f60_entry.jpg\nTentative ID: Anna (similarity 0.96).\nSensors: cat weight 3195 g, NH\u2083 51 ppb, CH\u2084 6 ppb.\nReasoning: YES. The cat in both images has similar black and white fur patterns and a black circle on the collar, suggesting they are the same.",
+      "exit_result": "Visit #10 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/9253d78b_exit.jpg\nSensors: cat weight 3195 g, waste 92 g, NH\u2083 51 ppb, CH\u2084 6 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with this task based on the images provided."
+    },
+    {
+      "sequence": 11,
+      "cat_name": "Anna",
+      "visit_num": 1,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/001_c25e6c.jpg",
+      "visit_image_name": "001_c25e6c.jpg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2016,
+        "weight_entry_g": 5220,
+        "weight_exit_g": 2063,
+        "waste_g_true": 50,
+        "ammonia_peak_ppb": 54.1,
+        "methane_peak_ppb": 3.5
+      },
+      "entry_result": "Visit #11 opened at 2026-04-04 23:21:58 UTC.\nEntry image: api_sim_images/visits/2026-04-04/ad907fd2_entry.jpg\nTentative ID: Anna (similarity 1.00).\nSensors: cat weight 3204 g, NH\u2083 54 ppb, CH\u2084 4 ppb.\nReasoning: YES. Both images show a cat with similar black and white markings and wearing the same collar with the name \"Anna\" visible.",
+      "exit_result": "Visit #11 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/43f09604_exit.jpg\nSensors: cat weight 3204 g, waste 47 g, NH\u2083 54 ppb, CH\u2084 4 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't provide the analysis you're looking for."
+    },
+    {
+      "sequence": 12,
+      "cat_name": "Natasha",
+      "visit_num": 8,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8001.jpeg",
+      "visit_image_name": "IMG_8001.jpeg",
+      "identified_cat": "Natasha",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2014,
+        "weight_entry_g": 6994,
+        "weight_exit_g": 2082,
+        "waste_g_true": 37,
+        "ammonia_peak_ppb": 30.2,
+        "methane_peak_ppb": 39.9
+      },
+      "entry_result": "Visit #12 opened at 2026-04-04 23:22:05 UTC.\nEntry image: api_sim_images/visits/2026-04-04/a5f2dfa9_entry.jpg\nTentative ID: Natasha (similarity 0.92).\nSensors: cat weight 4980 g, NH\u2083 30 ppb, CH\u2084 40 ppb.\nReasoning: YES. The cat in both images appears to have the same black and white markings and is in a similar environment, suggesting they are the same cat.",
+      "exit_result": "Visit #12 closed (tentative cat: Natasha).\nExit image: api_sim_images/visits/2026-04-04/a37cdf74_exit.jpg\nSensors: cat weight 4980 g, waste 68 g, NH\u2083 30 ppb, CH\u2084 40 ppb.\nHealth: No anomalies detected\n\nI'm unable to view or compare the provided images. Please make sure the images are clear and relevant to the litter box conditions as mentioned in your request.\n\nIf you need assistance, please provide descriptive details about what the images show."
+    },
+    {
+      "sequence": 13,
+      "cat_name": "Natasha",
+      "visit_num": 7,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8002.jpeg",
+      "visit_image_name": "IMG_8002.jpeg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.8,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1994,
+        "weight_entry_g": 7015,
+        "weight_exit_g": 2078,
+        "waste_g_true": 90,
+        "ammonia_peak_ppb": 12.2,
+        "methane_peak_ppb": 25.8
+      },
+      "entry_result": "Visit #13 opened at 2026-04-04 23:22:12 UTC.\nEntry image: api_sim_images/visits/2026-04-04/8fa98643_entry.jpg\nCat not identified (best score 0.80). Flagged for human review.\nSensors: cat weight 5021 g, NH\u2083 12 ppb, CH\u2084 26 ppb.\nReasoning: Could not confirm identity. Best candidate 'Luna' scored 0.80 (threshold 0.82).",
+      "exit_result": "Visit #13 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/42132be1_exit.jpg\nSensors: cat weight 5021 g, waste 84 g, NH\u2083 12 ppb, CH\u2084 26 ppb.\nHealth: No anomalies detected\n\nI'm unable to analyze the images in the context you've provided. Please ensure to show images of the litter box before and after the cat's visit as described.\n\n\u26a0\ufe0f This analysis is preliminary and must be reviewed by a licensed veterinarian before any medical decisions are made."
+    },
+    {
+      "sequence": 14,
+      "cat_name": "Anna",
+      "visit_num": 10,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7989.jpeg",
+      "visit_image_name": "IMG_7989.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2045,
+        "weight_entry_g": 5274,
+        "weight_exit_g": 2067,
+        "waste_g_true": 51,
+        "ammonia_peak_ppb": 6.8,
+        "methane_peak_ppb": 12.6
+      },
+      "entry_result": "Visit #14 opened at 2026-04-04 23:22:20 UTC.\nEntry image: api_sim_images/visits/2026-04-04/63342a2c_entry.jpg\nTentative ID: Anna (similarity 0.96).\nSensors: cat weight 3229 g, NH\u2083 7 ppb, CH\u2084 13 ppb.\nReasoning: YES. The patterns and features of the cat's fur appear to match in both images.",
+      "exit_result": "Visit #14 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/0a1509c7_exit.jpg\nSensors: cat weight 3229 g, waste 22 g, NH\u2083 7 ppb, CH\u2084 13 ppb.\nHealth: No anomalies detected\n\nI'm unable to view the requested images of the litter box scenario. Could you please provide those specific images for analysis?"
+    },
+    {
+      "sequence": 15,
+      "cat_name": "Whiskers",
+      "visit_num": 4,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/002_32dbc2.jpg",
+      "visit_image_name": "002_32dbc2.jpg",
+      "identified_cat": "Whiskers",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1978,
+        "weight_entry_g": 8004,
+        "weight_exit_g": 2025,
+        "waste_g_true": 42,
+        "ammonia_peak_ppb": 58.9,
+        "methane_peak_ppb": 6.5
+      },
+      "entry_result": "Visit #15 opened at 2026-04-04 23:22:28 UTC.\nEntry image: api_sim_images/visits/2026-04-04/2418edb3_entry.jpg\nTentative ID: Whiskers (similarity 1.00).\nSensors: cat weight 6026 g, NH\u2083 59 ppb, CH\u2084 6 ppb.\nReasoning: YES, the photos are identical, showing the same cat.",
+      "exit_result": "Visit #15 closed (tentative cat: Whiskers).\nExit image: api_sim_images/visits/2026-04-04/cc17d7dd_exit.jpg\nSensors: cat weight 6026 g, waste 47 g, NH\u2083 59 ppb, CH\u2084 6 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with that."
+    },
+    {
+      "sequence": 16,
+      "cat_name": "Whiskers",
+      "visit_num": 2,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/001_b0c0d4.jpg",
+      "visit_image_name": "001_b0c0d4.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 1.0,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1960,
+        "weight_entry_g": 7959,
+        "weight_exit_g": 2003,
+        "waste_g_true": 55,
+        "ammonia_peak_ppb": 16.6,
+        "methane_peak_ppb": 13.7
+      },
+      "entry_result": "Visit #16 opened at 2026-04-04 23:22:31 UTC.\nEntry image: api_sim_images/visits/2026-04-04/21ebf666_entry.jpg\nCat not identified (best score 1.00). Flagged for human review.\nSensors: cat weight 5999 g, NH\u2083 17 ppb, CH\u2084 14 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 1.00 (threshold 0.82).",
+      "exit_result": "Visit #16 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/44c16244_exit.jpg\nSensors: cat weight 5999 g, waste 43 g, NH\u2083 17 ppb, CH\u2084 14 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with viewing these images. Please try uploading them again."
+    },
+    {
+      "sequence": 17,
+      "cat_name": "Luna",
+      "visit_num": 4,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/001_a150db.jpg",
+      "visit_image_name": "001_a150db.jpg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1987,
+        "weight_entry_g": 7469,
+        "weight_exit_g": 2029,
+        "waste_g_true": 50,
+        "ammonia_peak_ppb": 8.9,
+        "methane_peak_ppb": 25.2
+      },
+      "entry_result": "Visit #17 opened at 2026-04-04 23:22:35 UTC.\nEntry image: api_sim_images/visits/2026-04-04/91b0d4c3_entry.jpg\nTentative ID: Luna (similarity 1.00).\nSensors: cat weight 5482 g, NH\u2083 9 ppb, CH\u2084 25 ppb.\nReasoning: YES\n\nThe two images are identical, indicating the same cat is shown in both.",
+      "exit_result": "Visit #17 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/77a215b0_exit.jpg\nSensors: cat weight 5482 g, waste 42 g, NH\u2083 9 ppb, CH\u2084 25 ppb.\nHealth: No anomalies detected\n\nI'm unable to view or compare images. Please describe the images, and I can help analyze based on your description."
+    },
+    {
+      "sequence": 18,
+      "cat_name": "Marina",
+      "visit_num": 7,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/001_aad380.jpg",
+      "visit_image_name": "001_aad380.jpg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2039,
+        "weight_entry_g": 6021,
+        "weight_exit_g": 2080,
+        "waste_g_true": 54,
+        "ammonia_peak_ppb": 55.2,
+        "methane_peak_ppb": 34.8
+      },
+      "entry_result": "Visit #18 opened at 2026-04-04 23:22:43 UTC.\nEntry image: api_sim_images/visits/2026-04-04/22505e59_entry.jpg\nTentative ID: Anna (similarity 0.93).\nSensors: cat weight 3982 g, NH\u2083 55 ppb, CH\u2084 35 ppb.\nReasoning: YES. The cat in both images has similar black and white markings and is wearing a collar, suggesting they are the same cat.",
+      "exit_result": "Visit #18 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/837cdb47_exit.jpg\nSensors: cat weight 3982 g, waste 41 g, NH\u2083 55 ppb, CH\u2084 35 ppb.\nHealth: No anomalies detected\n\nIt seems like there was an error. The images provided don't show a litter box. Please try again with the correct images."
+    },
+    {
+      "sequence": 19,
+      "cat_name": "Natasha",
+      "visit_num": 5,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/001_4c58dd.jpg",
+      "visit_image_name": "001_4c58dd.jpg",
+      "identified_cat": "Natasha",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2008,
+        "weight_entry_g": 7005,
+        "weight_exit_g": 2030,
+        "waste_g_true": 47,
+        "ammonia_peak_ppb": 17.9,
+        "methane_peak_ppb": 4.8
+      },
+      "entry_result": "Visit #19 opened at 2026-04-04 23:22:56 UTC.\nEntry image: api_sim_images/visits/2026-04-04/6fc89068_entry.jpg\nTentative ID: Natasha (similarity 1.00).\nSensors: cat weight 4997 g, NH\u2083 18 ppb, CH\u2084 5 ppb.\nReasoning: YES. The images are identical, showing the same cat.",
+      "exit_result": "Visit #19 closed (tentative cat: Natasha).\nExit image: api_sim_images/visits/2026-04-04/afb66f46_exit.jpg\nSensors: cat weight 4997 g, waste 22 g, NH\u2083 18 ppb, CH\u2084 5 ppb.\nHealth: No anomalies detected\n\nI'm unable to analyze images of this type. Please ensure you upload images of the litter box before and after the cat's use."
+    },
+    {
+      "sequence": 20,
+      "cat_name": "Marina",
+      "visit_num": 1,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7193.jpeg",
+      "visit_image_name": "IMG_7193.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2040,
+        "weight_entry_g": 6067,
+        "weight_exit_g": 2118,
+        "waste_g_true": 81,
+        "ammonia_peak_ppb": 32.5,
+        "methane_peak_ppb": 35.4
+      },
+      "entry_result": "Visit #20 opened at 2026-04-04 23:23:03 UTC.\nEntry image: api_sim_images/visits/2026-04-04/aca31d7f_entry.jpg\nTentative ID: Marina (similarity 0.92).\nSensors: cat weight 4027 g, NH\u2083 32 ppb, CH\u2084 35 ppb.\nReasoning: YES. \n\nThe cat in both images appears to have similar black and white fur patterns and features, suggesting they are the same cat.",
+      "exit_result": "Visit #20 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/d975969f_exit.jpg\nSensors: cat weight 4027 g, waste 78 g, NH\u2083 32 ppb, CH\u2084 35 ppb.\nHealth: No anomalies detected\n\nI'm unable to analyze the litter box images as you provided a photo of a cat and a solid color image. Please provide the correct before and after images of the litter box for analysis."
+    },
+    {
+      "sequence": 21,
+      "cat_name": "Marina",
+      "visit_num": 2,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7311.jpeg",
+      "visit_image_name": "IMG_7311.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1986,
+        "weight_entry_g": 5996,
+        "weight_exit_g": 2092,
+        "waste_g_true": 97,
+        "ammonia_peak_ppb": 34.6,
+        "methane_peak_ppb": 29.9
+      },
+      "entry_result": "Visit #21 opened at 2026-04-04 23:23:12 UTC.\nEntry image: api_sim_images/visits/2026-04-04/14fef37a_entry.jpg\nTentative ID: Marina (similarity 0.92).\nSensors: cat weight 4010 g, NH\u2083 35 ppb, CH\u2084 30 ppb.\nReasoning: YES, the cat in Image 1 appears to show the same cat as in Image 2. Both images feature a black and white cat with similar facial markings.",
+      "exit_result": "Visit #21 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/a1fee637_exit.jpg\nSensors: cat weight 4010 g, waste 106 g, NH\u2083 35 ppb, CH\u2084 30 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I need the images of the litter box before and after the cat's use to properly assess any potential health concerns. The current images are not related."
+    },
+    {
+      "sequence": 22,
+      "cat_name": "Marina",
+      "visit_num": 4,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/001_aad380.jpg",
+      "visit_image_name": "001_aad380.jpg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2000,
+        "weight_entry_g": 6010,
+        "weight_exit_g": 2101,
+        "waste_g_true": 91,
+        "ammonia_peak_ppb": 37.8,
+        "methane_peak_ppb": 15.4
+      },
+      "entry_result": "Visit #22 opened at 2026-04-04 23:23:20 UTC.\nEntry image: api_sim_images/visits/2026-04-04/d268a8c0_entry.jpg\nTentative ID: Anna (similarity 0.93).\nSensors: cat weight 4010 g, NH\u2083 38 ppb, CH\u2084 15 ppb.\nReasoning: YES. The cat in both images has a similar black and white pattern and is wearing a tag.",
+      "exit_result": "Visit #22 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/d34f52e4_exit.jpg\nSensors: cat weight 4010 g, waste 101 g, NH\u2083 38 ppb, CH\u2084 15 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but it looks like there was an issue with the image provided. Could you please upload the images of the litter box again so I can assist you with the comparison?"
+    },
+    {
+      "sequence": 23,
+      "cat_name": "Whiskers",
+      "visit_num": 6,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/002_32dbc2.jpg",
+      "visit_image_name": "002_32dbc2.jpg",
+      "identified_cat": "Whiskers",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2019,
+        "weight_entry_g": 8004,
+        "weight_exit_g": 2054,
+        "waste_g_true": 41,
+        "ammonia_peak_ppb": 22.0,
+        "methane_peak_ppb": 36.0
+      },
+      "entry_result": "Visit #23 opened at 2026-04-04 23:23:34 UTC.\nEntry image: api_sim_images/visits/2026-04-04/059abdd5_entry.jpg\nTentative ID: Whiskers (similarity 1.00).\nSensors: cat weight 5985 g, NH\u2083 22 ppb, CH\u2084 36 ppb.\nReasoning: YES. The images are identical, indicating the same cat is shown in both.",
+      "exit_result": "Visit #23 closed (tentative cat: Whiskers).\nExit image: api_sim_images/visits/2026-04-04/3038ef6d_exit.jpg\nSensors: cat weight 5985 g, waste 35 g, NH\u2083 22 ppb, CH\u2084 36 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with image analysis in this context."
+    },
+    {
+      "sequence": 24,
+      "cat_name": "Natasha",
+      "visit_num": 1,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8004.jpeg",
+      "visit_image_name": "IMG_8004.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2007,
+        "weight_entry_g": 6992,
+        "weight_exit_g": 2086,
+        "waste_g_true": 74,
+        "ammonia_peak_ppb": 8.2,
+        "methane_peak_ppb": 15.2
+      },
+      "entry_result": "Visit #24 opened at 2026-04-04 23:23:37 UTC.\nEntry image: api_sim_images/visits/2026-04-04/2ebb170c_entry.jpg\nTentative ID: Marina (similarity 0.87).\nSensors: cat weight 4985 g, NH\u2083 8 ppb, CH\u2084 15 ppb.\nReasoning: YES, both images show a black and white cat with similar markings, suggesting it could be the same cat.",
+      "exit_result": "Visit #24 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/a58e5ffc_exit.jpg\nSensors: cat weight 4985 g, waste 79 g, NH\u2083 8 ppb, CH\u2084 15 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I cannot analyze these images as planned. Please provide the correct images as described in the task."
+    },
+    {
+      "sequence": 25,
+      "cat_name": "Natasha",
+      "visit_num": 2,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8001.jpeg",
+      "visit_image_name": "IMG_8001.jpeg",
+      "identified_cat": "Natasha",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2020,
+        "weight_entry_g": 7015,
+        "weight_exit_g": 2126,
+        "waste_g_true": 71,
+        "ammonia_peak_ppb": 28.3,
+        "methane_peak_ppb": 38.3
+      },
+      "entry_result": "Visit #25 opened at 2026-04-04 23:23:46 UTC.\nEntry image: api_sim_images/visits/2026-04-04/f2fde1cd_entry.jpg\nTentative ID: Natasha (similarity 0.92).\nSensors: cat weight 4995 g, NH\u2083 28 ppb, CH\u2084 38 ppb.\nReasoning: YES, Image 1 appears to show the same cat as Image 2. The fur patterns and colors, as well as the setting, match in both images.",
+      "exit_result": "Visit #25 closed (tentative cat: Natasha).\nExit image: api_sim_images/visits/2026-04-04/0c9fef09_exit.jpg\nSensors: cat weight 4995 g, waste 106 g, NH\u2083 28 ppb, CH\u2084 38 ppb.\nHealth: No anomalies detected\n\nI'm unable to compare litter box images based on the images provided. Please provide the correct images of the litter box for comparison."
+    },
+    {
+      "sequence": 26,
+      "cat_name": "Whiskers",
+      "visit_num": 8,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/002_b2e960.jpg",
+      "visit_image_name": "002_b2e960.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.55,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2021,
+        "weight_entry_g": 8021,
+        "weight_exit_g": 2026,
+        "waste_g_true": 51,
+        "ammonia_peak_ppb": 13.9,
+        "methane_peak_ppb": 32.0
+      },
+      "entry_result": "Visit #26 opened at 2026-04-04 23:23:52 UTC.\nEntry image: api_sim_images/visits/2026-04-04/53625317_entry.jpg\nCat not identified (best score 0.55). Flagged for human review.\nSensors: cat weight 6000 g, NH\u2083 14 ppb, CH\u2084 32 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 0.55 (threshold 0.82).",
+      "exit_result": "Visit #26 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/69810148_exit.jpg\nSensors: cat weight 6000 g, waste 5 g, NH\u2083 14 ppb, CH\u2084 32 ppb.\nHealth: No anomalies detected\n\nI'm unable to assist with comparing or analyzing images."
+    },
+    {
+      "sequence": 27,
+      "cat_name": "Marina",
+      "visit_num": 9,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7490.jpeg",
+      "visit_image_name": "IMG_7490.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2024,
+        "weight_entry_g": 6004,
+        "weight_exit_g": 2112,
+        "waste_g_true": 74,
+        "ammonia_peak_ppb": 59.2,
+        "methane_peak_ppb": 32.3
+      },
+      "entry_result": "Visit #27 opened at 2026-04-04 23:23:53 UTC.\nEntry image: api_sim_images/visits/2026-04-04/0e17509e_entry.jpg\nTentative ID: Anna (similarity 0.90).\nSensors: cat weight 3980 g, NH\u2083 59 ppb, CH\u2084 32 ppb.\nReasoning: YES. The cat in both images has a similar black and white pattern and appears to be wearing the same type of collar.",
+      "exit_result": "Visit #27 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/b7aa647d_exit.jpg\nSensors: cat weight 3980 g, waste 88 g, NH\u2083 59 ppb, CH\u2084 32 ppb.\nHealth: No anomalies detected\n\nI'm unable to analyze the litter box images as they're not provided. Please upload the correct images for further assistance."
+    },
+    {
+      "sequence": 28,
+      "cat_name": "Anna",
+      "visit_num": 6,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7991.jpeg",
+      "visit_image_name": "IMG_7991.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1988,
+        "weight_entry_g": 5209,
+        "weight_exit_g": 2023,
+        "waste_g_true": 47,
+        "ammonia_peak_ppb": 8.8,
+        "methane_peak_ppb": 26.5
+      },
+      "entry_result": "Visit #28 opened at 2026-04-04 23:24:06 UTC.\nEntry image: api_sim_images/visits/2026-04-04/72575129_entry.jpg\nTentative ID: Anna (similarity 0.95).\nSensors: cat weight 3221 g, NH\u2083 9 ppb, CH\u2084 26 ppb.\nReasoning: YES\n\nThe cat in both images has similar black and white markings and is wearing a similar collar, suggesting they are the same cat.",
+      "exit_result": "Visit #28 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/3e8eef4b_exit.jpg\nSensors: cat weight 3221 g, waste 35 g, NH\u2083 9 ppb, CH\u2084 26 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with this request."
+    },
+    {
+      "sequence": 29,
+      "cat_name": "Anna",
+      "visit_num": 9,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7988.jpeg",
+      "visit_image_name": "IMG_7988.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1985,
+        "weight_entry_g": 5180,
+        "weight_exit_g": 2051,
+        "waste_g_true": 72,
+        "ammonia_peak_ppb": 42.8,
+        "methane_peak_ppb": 8.8
+      },
+      "entry_result": "Visit #29 opened at 2026-04-04 23:24:14 UTC.\nEntry image: api_sim_images/visits/2026-04-04/ef9b91e7_entry.jpg\nTentative ID: Anna (similarity 1.00).\nSensors: cat weight 3195 g, NH\u2083 43 ppb, CH\u2084 9 ppb.\nReasoning: YES. The cats in both images have identical markings and collars, indicating they are the same.",
+      "exit_result": "Visit #29 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/6250b851_exit.jpg\nSensors: cat weight 3195 g, waste 66 g, NH\u2083 43 ppb, CH\u2084 9 ppb.\nHealth: No anomalies detected\n\nI'm unable to view the specific content of these images. Please upload the images of the litter box before and after use for analysis."
+    },
+    {
+      "sequence": 30,
+      "cat_name": "Luna",
+      "visit_num": 9,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7633.jpeg",
+      "visit_image_name": "IMG_7633.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1989,
+        "weight_entry_g": 7485,
+        "weight_exit_g": 1996,
+        "waste_g_true": 47,
+        "ammonia_peak_ppb": 9.1,
+        "methane_peak_ppb": 32.3
+      },
+      "entry_result": "Visit #30 opened at 2026-04-04 23:24:21 UTC.\nEntry image: api_sim_images/visits/2026-04-04/574391e3_entry.jpg\nTentative ID: Luna (similarity 1.00).\nSensors: cat weight 5496 g, NH\u2083 9 ppb, CH\u2084 32 ppb.\nReasoning: YES, the images show the same cat. The positioning, lighting, and background elements appear consistent.",
+      "exit_result": "Visit #30 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/4b418804_exit.jpg\nSensors: cat weight 5496 g, waste 7 g, NH\u2083 9 ppb, CH\u2084 32 ppb.\nHealth: No anomalies detected\n\nI'm unable to review or assess images. For this type of detailed analysis, I recommend consulting with a veterinary professional directly."
+    },
+    {
+      "sequence": 31,
+      "cat_name": "Anna",
+      "visit_num": 4,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7989.jpeg",
+      "visit_image_name": "IMG_7989.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1975,
+        "weight_entry_g": 5217,
+        "weight_exit_g": 2077,
+        "waste_g_true": 60,
+        "ammonia_peak_ppb": 10.1,
+        "methane_peak_ppb": 3.9
+      },
+      "entry_result": "Visit #31 opened at 2026-04-04 23:24:29 UTC.\nEntry image: api_sim_images/visits/2026-04-04/11885c64_entry.jpg\nTentative ID: Anna (similarity 0.96).\nSensors: cat weight 3242 g, NH\u2083 10 ppb, CH\u2084 4 ppb.\nReasoning: YES\n\nBoth cats appear to have similar black and white patterns, face markings, and are wearing the same collar, suggesting they are the same cat.",
+      "exit_result": "Visit #31 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/72c96a41_exit.jpg\nSensors: cat weight 3242 g, waste 102 g, NH\u2083 10 ppb, CH\u2084 4 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't determine visual differences between these images."
+    },
+    {
+      "sequence": 32,
+      "cat_name": "Whiskers",
+      "visit_num": 3,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/002_b2e960.jpg",
+      "visit_image_name": "002_b2e960.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.55,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1990,
+        "weight_entry_g": 7972,
+        "weight_exit_g": 2096,
+        "waste_g_true": 74,
+        "ammonia_peak_ppb": 10.1,
+        "methane_peak_ppb": 16.9
+      },
+      "entry_result": "Visit #32 opened at 2026-04-04 23:24:36 UTC.\nEntry image: api_sim_images/visits/2026-04-04/0ae8ffb3_entry.jpg\nCat not identified (best score 0.55). Flagged for human review.\nSensors: cat weight 5982 g, NH\u2083 10 ppb, CH\u2084 17 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 0.55 (threshold 0.82).",
+      "exit_result": "Visit #32 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/334912ec_exit.jpg\nSensors: cat weight 5982 g, waste 106 g, NH\u2083 10 ppb, CH\u2084 17 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with the analysis of these images."
+    },
+    {
+      "sequence": 33,
+      "cat_name": "Natasha",
+      "visit_num": 10,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_7998.jpeg",
+      "visit_image_name": "IMG_7998.jpeg",
+      "identified_cat": "Natasha",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1983,
+        "weight_entry_g": 6948,
+        "weight_exit_g": 2049,
+        "waste_g_true": 57,
+        "ammonia_peak_ppb": 59.1,
+        "methane_peak_ppb": 32.3
+      },
+      "entry_result": "Visit #33 opened at 2026-04-04 23:24:38 UTC.\nEntry image: api_sim_images/visits/2026-04-04/810f38bf_entry.jpg\nTentative ID: Natasha (similarity 1.00).\nSensors: cat weight 4965 g, NH\u2083 59 ppb, CH\u2084 32 ppb.\nReasoning: YES. The images are identical, showing the same cat with similar markings.",
+      "exit_result": "Visit #33 closed (tentative cat: Natasha).\nExit image: api_sim_images/visits/2026-04-04/fe245a72_exit.jpg\nSensors: cat weight 4965 g, waste 66 g, NH\u2083 59 ppb, CH\u2084 32 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I need to see images of the litter box before and after use to provide an analysis. Could you please provide those images?"
+    },
+    {
+      "sequence": 34,
+      "cat_name": "Whiskers",
+      "visit_num": 1,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/002_b2e960.jpg",
+      "visit_image_name": "002_b2e960.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.55,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2037,
+        "weight_entry_g": 8040,
+        "weight_exit_g": 2070,
+        "waste_g_true": 57,
+        "ammonia_peak_ppb": 12.4,
+        "methane_peak_ppb": 4.6
+      },
+      "entry_result": "Visit #34 opened at 2026-04-04 23:24:46 UTC.\nEntry image: api_sim_images/visits/2026-04-04/241f9968_entry.jpg\nCat not identified (best score 0.55). Flagged for human review.\nSensors: cat weight 6003 g, NH\u2083 12 ppb, CH\u2084 5 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 0.55 (threshold 0.82).",
+      "exit_result": "Visit #34 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/553c06b1_exit.jpg\nSensors: cat weight 6003 g, waste 33 g, NH\u2083 12 ppb, CH\u2084 5 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I cannot analyze or compare images directly. However, I can help interpret the data provided or answer questions about possible health issues in cats. Let me know how else I may assist you!"
+    },
+    {
+      "sequence": 35,
+      "cat_name": "Natasha",
+      "visit_num": 3,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/IMG_8004.jpeg",
+      "visit_image_name": "IMG_8004.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1970,
+        "weight_entry_g": 6954,
+        "weight_exit_g": 1999,
+        "waste_g_true": 44,
+        "ammonia_peak_ppb": 36.9,
+        "methane_peak_ppb": 21.7
+      },
+      "entry_result": "Visit #35 opened at 2026-04-04 23:24:47 UTC.\nEntry image: api_sim_images/visits/2026-04-04/01024bce_entry.jpg\nTentative ID: Marina (similarity 0.87).\nSensors: cat weight 4984 g, NH\u2083 37 ppb, CH\u2084 22 ppb.\nReasoning: YES. The cats in both images have similar black and white coloring and facial markings, indicating they could be the same cat.",
+      "exit_result": "Visit #35 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/f3958de5_exit.jpg\nSensors: cat weight 4984 g, waste 29 g, NH\u2083 37 ppb, CH\u2084 22 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I can't evaluate these images as they are not showing the litter box before and after the cat's use. Please provide the correct images for an assessment."
+    },
+    {
+      "sequence": 36,
+      "cat_name": "Whiskers",
+      "visit_num": 7,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/001_b0c0d4.jpg",
+      "visit_image_name": "001_b0c0d4.jpg",
+      "identified_cat": "Whiskers",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2011,
+        "weight_entry_g": 7999,
+        "weight_exit_g": 2091,
+        "waste_g_true": 52,
+        "ammonia_peak_ppb": 53.6,
+        "methane_peak_ppb": 16.3
+      },
+      "entry_result": "Visit #36 opened at 2026-04-04 23:24:54 UTC.\nEntry image: api_sim_images/visits/2026-04-04/fc32d1db_entry.jpg\nTentative ID: Whiskers (similarity 1.00).\nSensors: cat weight 5988 g, NH\u2083 54 ppb, CH\u2084 16 ppb.\nReasoning: YES. \n\nBoth images are identical, showing the same tabby cat.",
+      "exit_result": "Visit #36 closed (tentative cat: Whiskers).\nExit image: api_sim_images/visits/2026-04-04/c62e3cfc_exit.jpg\nSensors: cat weight 5988 g, waste 80 g, NH\u2083 54 ppb, CH\u2084 16 ppb.\nHealth: No anomalies detected\n\nI'm unable to view or compare images. Please review them according to the specified criteria."
+    },
+    {
+      "sequence": 37,
+      "cat_name": "Natasha",
+      "visit_num": 9,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/natasha/001_4c58dd.jpg",
+      "visit_image_name": "001_4c58dd.jpg",
+      "identified_cat": "Natasha",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2012,
+        "weight_entry_g": 7021,
+        "weight_exit_g": 2104,
+        "waste_g_true": 54,
+        "ammonia_peak_ppb": 53.4,
+        "methane_peak_ppb": 14.8
+      },
+      "entry_result": "Visit #37 opened at 2026-04-04 23:24:57 UTC.\nEntry image: api_sim_images/visits/2026-04-04/a9d9e37d_entry.jpg\nTentative ID: Natasha (similarity 1.00).\nSensors: cat weight 5009 g, NH\u2083 53 ppb, CH\u2084 15 ppb.\nReasoning: YES, the images are identical, showing the same cat.",
+      "exit_result": "Visit #37 closed (tentative cat: Natasha).\nExit image: api_sim_images/visits/2026-04-04/b4421f10_exit.jpg\nSensors: cat weight 5009 g, waste 92 g, NH\u2083 53 ppb, CH\u2084 15 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but I can't evaluate or analyze the images you've uploaded."
+    },
+    {
+      "sequence": 38,
+      "cat_name": "Anna",
+      "visit_num": 5,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7989.jpeg",
+      "visit_image_name": "IMG_7989.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1971,
+        "weight_entry_g": 5138,
+        "weight_exit_g": 2015,
+        "waste_g_true": 96,
+        "ammonia_peak_ppb": 25.8,
+        "methane_peak_ppb": 22.1
+      },
+      "entry_result": "Visit #38 opened at 2026-04-04 23:25:05 UTC.\nEntry image: api_sim_images/visits/2026-04-04/dfced676_entry.jpg\nTentative ID: Anna (similarity 0.96).\nSensors: cat weight 3167 g, NH\u2083 26 ppb, CH\u2084 22 ppb.\nReasoning: YES\n\nThe cats in both images have similar coloration and patterns, including the black and white fur and facial markings.",
+      "exit_result": "Visit #38 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/9c5f1441_exit.jpg\nSensors: cat weight 3167 g, waste 44 g, NH\u2083 26 ppb, CH\u2084 22 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't review or compare the content of the images provided."
+    },
+    {
+      "sequence": 39,
+      "cat_name": "Marina",
+      "visit_num": 8,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7193.jpeg",
+      "visit_image_name": "IMG_7193.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2000,
+        "weight_entry_g": 6019,
+        "weight_exit_g": 2028,
+        "waste_g_true": 48,
+        "ammonia_peak_ppb": 25.6,
+        "methane_peak_ppb": 6.5
+      },
+      "entry_result": "Visit #39 opened at 2026-04-04 23:25:12 UTC.\nEntry image: api_sim_images/visits/2026-04-04/2690dd14_entry.jpg\nTentative ID: Marina (similarity 0.92).\nSensors: cat weight 4019 g, NH\u2083 26 ppb, CH\u2084 6 ppb.\nReasoning: YES. The cat in both images has similar black and white markings and is wearing an identical collar.",
+      "exit_result": "Visit #39 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/4351ef7e_exit.jpg\nSensors: cat weight 4019 g, waste 28 g, NH\u2083 26 ppb, CH\u2084 6 ppb.\nHealth: No anomalies detected\n\nI'm unable to view the images related to the litter box. Please upload the correct images for analysis according to the provided instructions."
+    },
+    {
+      "sequence": 40,
+      "cat_name": "Luna",
+      "visit_num": 2,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7994.jpeg",
+      "visit_image_name": "IMG_7994.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1959,
+        "weight_entry_g": 7441,
+        "weight_exit_g": 2044,
+        "waste_g_true": 79,
+        "ammonia_peak_ppb": 45.1,
+        "methane_peak_ppb": 8.0
+      },
+      "entry_result": "Visit #40 opened at 2026-04-04 23:25:20 UTC.\nEntry image: api_sim_images/visits/2026-04-04/cdf3235c_entry.jpg\nTentative ID: Luna (similarity 0.82).\nSensors: cat weight 5482 g, NH\u2083 45 ppb, CH\u2084 8 ppb.\nReasoning: YES. Both cats in the images are black, which suggests they could be the same.",
+      "exit_result": "Visit #40 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/6364d152_exit.jpg\nSensors: cat weight 5482 g, waste 85 g, NH\u2083 45 ppb, CH\u2084 8 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't analyze these images. Please provide images of the litter box pre- and post-use for assessment."
+    },
+    {
+      "sequence": 41,
+      "cat_name": "Luna",
+      "visit_num": 6,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7996.jpeg",
+      "visit_image_name": "IMG_7996.jpeg",
+      "identified_cat": "Unknown",
+      "similarity_score": 0.87,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1999,
+        "weight_entry_g": 7535,
+        "weight_exit_g": 2062,
+        "waste_g_true": 73,
+        "ammonia_peak_ppb": 48.2,
+        "methane_peak_ppb": 32.3
+      },
+      "entry_result": "Visit #41 opened at 2026-04-04 23:25:35 UTC.\nEntry image: api_sim_images/visits/2026-04-04/ae0232e8_entry.jpg\nCat not identified (best score 0.87). Flagged for human review.\nSensors: cat weight 5536 g, NH\u2083 48 ppb, CH\u2084 32 ppb.\nReasoning: Could not confirm identity. Best candidate 'Marina' scored 0.87 (threshold 0.82).",
+      "exit_result": "Visit #41 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/95c74bbd_exit.jpg\nSensors: cat weight 5536 g, waste 63 g, NH\u2083 48 ppb, CH\u2084 32 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I cannot analyze these images as described."
+    },
+    {
+      "sequence": 42,
+      "cat_name": "Whiskers",
+      "visit_num": 9,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/001_b0c0d4.jpg",
+      "visit_image_name": "001_b0c0d4.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 1.0,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2003,
+        "weight_entry_g": 7998,
+        "weight_exit_g": 2076,
+        "waste_g_true": 96,
+        "ammonia_peak_ppb": 49.1,
+        "methane_peak_ppb": 34.6
+      },
+      "entry_result": "Visit #42 opened at 2026-04-04 23:25:46 UTC.\nEntry image: api_sim_images/visits/2026-04-04/59660124_entry.jpg\nCat not identified (best score 1.00). Flagged for human review.\nSensors: cat weight 5995 g, NH\u2083 49 ppb, CH\u2084 35 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 1.00 (threshold 0.82).",
+      "exit_result": "Visit #42 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/a2884e80_exit.jpg\nSensors: cat weight 5995 g, waste 73 g, NH\u2083 49 ppb, CH\u2084 35 ppb.\nHealth: No anomalies detected\n\nI'm unable to compare or analyze the litter box images you're referring to. Please upload or verify the images again."
+    },
+    {
+      "sequence": 43,
+      "cat_name": "Anna",
+      "visit_num": 2,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/anna/IMG_7990.jpeg",
+      "visit_image_name": "IMG_7990.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1970,
+        "weight_entry_g": 5183,
+        "weight_exit_g": 2023,
+        "waste_g_true": 51,
+        "ammonia_peak_ppb": 38.1,
+        "methane_peak_ppb": 22.4
+      },
+      "entry_result": "Visit #43 opened at 2026-04-04 23:25:49 UTC.\nEntry image: api_sim_images/visits/2026-04-04/207b27ba_entry.jpg\nTentative ID: Anna (similarity 0.93).\nSensors: cat weight 3213 g, NH\u2083 38 ppb, CH\u2084 22 ppb.\nReasoning: YES. The cats in both images have similar black and white markings and are wearing identical collars with similar tags.",
+      "exit_result": "Visit #43 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/a039bd6e_exit.jpg\nSensors: cat weight 3213 g, waste 53 g, NH\u2083 38 ppb, CH\u2084 22 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't analyze or compare these images."
+    },
+    {
+      "sequence": 44,
+      "cat_name": "Whiskers",
+      "visit_num": 5,
+      "is_anomalous": true,
+      "visit_image_path": "images/cats/whiskers/002_32dbc2.jpg",
+      "visit_image_name": "002_32dbc2.jpg",
+      "identified_cat": "Unknown",
+      "similarity_score": 1.0,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1980,
+        "weight_entry_g": 7970,
+        "weight_exit_g": 2048,
+        "waste_g_true": 31,
+        "ammonia_peak_ppb": 330.8,
+        "methane_peak_ppb": 134.6
+      },
+      "entry_result": "Visit #44 opened at 2026-04-04 23:25:56 UTC.\nEntry image: api_sim_images/visits/2026-04-04/dfa6ed1f_entry.jpg\nCat not identified (best score 1.00). Flagged for human review.\nSensors: cat weight 5990 g, NH\u2083 331 ppb, CH\u2084 135 ppb.\nReasoning: Could not confirm identity. Best candidate 'Whiskers' scored 1.00 (threshold 0.82).",
+      "exit_result": "Visit #44 closed (tentative cat: Unknown).\nExit image: api_sim_images/visits/2026-04-04/3afbe15f_exit.jpg\nSensors: cat weight 5990 g, waste 68 g, NH\u2083 331 ppb, CH\u2084 135 ppb.\nHealth: No anomalies detected\n\nI'm unable to view the content of the images. Please provide more context or describe the changes you observe between the two images if possible."
+    },
+    {
+      "sequence": 45,
+      "cat_name": "Whiskers",
+      "visit_num": 10,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/whiskers/001_b0c0d4.jpg",
+      "visit_image_name": "001_b0c0d4.jpg",
+      "identified_cat": "Whiskers",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2040,
+        "weight_entry_g": 8034,
+        "weight_exit_g": 2115,
+        "waste_g_true": 40,
+        "ammonia_peak_ppb": 53.0,
+        "methane_peak_ppb": 34.3
+      },
+      "entry_result": "Visit #45 opened at 2026-04-04 23:25:59 UTC.\nEntry image: api_sim_images/visits/2026-04-04/90f82576_entry.jpg\nTentative ID: Whiskers (similarity 1.00).\nSensors: cat weight 5994 g, NH\u2083 53 ppb, CH\u2084 34 ppb.\nReasoning: YES. The images are identical, showing the same cat.",
+      "exit_result": "Visit #45 closed (tentative cat: Whiskers).\nExit image: api_sim_images/visits/2026-04-04/32980a96_exit.jpg\nSensors: cat weight 5994 g, waste 75 g, NH\u2083 53 ppb, CH\u2084 34 ppb.\nHealth: No anomalies detected\n\nI'm sorry, I can't assist with this visual analysis."
+    },
+    {
+      "sequence": 46,
+      "cat_name": "Marina",
+      "visit_num": 10,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7175.jpeg",
+      "visit_image_name": "IMG_7175.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2012,
+        "weight_entry_g": 6070,
+        "weight_exit_g": 2142,
+        "waste_g_true": 115,
+        "ammonia_peak_ppb": 9.7,
+        "methane_peak_ppb": 19.4
+      },
+      "entry_result": "Visit #46 opened at 2026-04-04 23:26:01 UTC.\nEntry image: api_sim_images/visits/2026-04-04/31c23731_entry.jpg\nTentative ID: Anna (similarity 0.93).\nSensors: cat weight 4058 g, NH\u2083 10 ppb, CH\u2084 19 ppb.\nReasoning: YES, the cat in Image 1 appears to be the same as the cat in Image 2. Both cats have similar black and white markings and a similar face shape.",
+      "exit_result": "Visit #46 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/11438f1f_exit.jpg\nSensors: cat weight 4058 g, waste 130 g, NH\u2083 10 ppb, CH\u2084 19 ppb.\nHealth: No anomalies detected\n\nI'm sorry, but it seems like the images provided are not of the litter box. Please try uploading the correct photos so I can assist you with the assessment."
+    },
+    {
+      "sequence": 47,
+      "cat_name": "Luna",
+      "visit_num": 3,
+      "is_anomalous": true,
+      "visit_image_path": "images/cats/luna/IMG_7992 2.jpeg",
+      "visit_image_name": "IMG_7992 2.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 1976,
+        "weight_entry_g": 7503,
+        "weight_exit_g": 2058,
+        "waste_g_true": 64,
+        "ammonia_peak_ppb": 199.6,
+        "methane_peak_ppb": 86.4
+      },
+      "entry_result": "Visit #47 opened at 2026-04-04 23:26:13 UTC.\nEntry image: api_sim_images/visits/2026-04-04/14882e9c_entry.jpg\nTentative ID: Luna (similarity 0.84).\nSensors: cat weight 5527 g, NH\u2083 200 ppb, CH\u2084 86 ppb.\nReasoning: YES. Both images show a black cat with similar features.",
+      "exit_result": "Visit #47 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/ef63dd3a_exit.jpg\nSensors: cat weight 5527 g, waste 82 g, NH\u2083 200 ppb, CH\u2084 86 ppb.\nHealth: No anomalies detected\n\nI'm unable to view the litter box images provided. Please upload the correct images for analysis."
+    },
+    {
+      "sequence": 48,
+      "cat_name": "Luna",
+      "visit_num": 10,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/luna/IMG_7994.jpeg",
+      "visit_image_name": "IMG_7994.jpeg",
+      "identified_cat": "Luna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2009,
+        "weight_entry_g": 7545,
+        "weight_exit_g": 2105,
+        "waste_g_true": 79,
+        "ammonia_peak_ppb": 5.8,
+        "methane_peak_ppb": 3.7
+      },
+      "entry_result": "Visit #48 opened at 2026-04-04 23:26:28 UTC.\nEntry image: api_sim_images/visits/2026-04-04/c9fd848b_entry.jpg\nTentative ID: Luna (similarity 0.82).\nSensors: cat weight 5536 g, NH\u2083 6 ppb, CH\u2084 4 ppb.\nReasoning: YES. Both images show a black cat with similar features such as ear shape and overall appearance.",
+      "exit_result": "Visit #48 closed (tentative cat: Luna).\nExit image: api_sim_images/visits/2026-04-04/5735188d_exit.jpg\nSensors: cat weight 5536 g, waste 96 g, NH\u2083 6 ppb, CH\u2084 4 ppb.\nHealth: No anomalies detected\n\nI'm unable to assess the litter box images in the requested way. Please try to upload them again, ensuring they show the necessary details."
+    },
+    {
+      "sequence": 49,
+      "cat_name": "Marina",
+      "visit_num": 3,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7311.jpeg",
+      "visit_image_name": "IMG_7311.jpeg",
+      "identified_cat": "Marina",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2016,
+        "weight_entry_g": 5998,
+        "weight_exit_g": 2090,
+        "waste_g_true": 50,
+        "ammonia_peak_ppb": 10.0,
+        "methane_peak_ppb": 1.9
+      },
+      "entry_result": "Visit #49 opened at 2026-04-04 23:26:43 UTC.\nEntry image: api_sim_images/visits/2026-04-04/6be4198b_entry.jpg\nTentative ID: Marina (similarity 0.92).\nSensors: cat weight 3982 g, NH\u2083 10 ppb, CH\u2084 2 ppb.\nReasoning: YES. The cat in both images has similar black and white markings and a matching face pattern.",
+      "exit_result": "Visit #49 closed (tentative cat: Marina).\nExit image: api_sim_images/visits/2026-04-04/975bde16_exit.jpg\nSensors: cat weight 3982 g, waste 74 g, NH\u2083 10 ppb, CH\u2084 2 ppb.\nHealth: No anomalies detected\n\nI'm unable to view and compare the images as you've intended. Please ensure the images are correctly shown so I can assist accordingly.\n\nAlternatively, you can describe the images, and I can help based on that information."
+    },
+    {
+      "sequence": 50,
+      "cat_name": "Marina",
+      "visit_num": 5,
+      "is_anomalous": false,
+      "visit_image_path": "images/cats/marina/IMG_7490.jpeg",
+      "visit_image_name": "IMG_7490.jpeg",
+      "identified_cat": "Anna",
+      "similarity_score": null,
+      "health_flag": true,
+      "sensor": {
+        "weight_pre_g": 2025,
+        "weight_entry_g": 6024,
+        "weight_exit_g": 2144,
+        "waste_g_true": 117,
+        "ammonia_peak_ppb": 44.6,
+        "methane_peak_ppb": 27.3
+      },
+      "entry_result": "Visit #50 opened at 2026-04-04 23:26:50 UTC.\nEntry image: api_sim_images/visits/2026-04-04/403f3de7_entry.jpg\nTentative ID: Anna (similarity 0.90).\nSensors: cat weight 3999 g, NH\u2083 45 ppb, CH\u2084 27 ppb.\nReasoning: YES. The cat in both images has similar black and white markings and a matching collar, suggesting it is the same cat.",
+      "exit_result": "Visit #50 closed (tentative cat: Anna).\nExit image: api_sim_images/visits/2026-04-04/be506907_exit.jpg\nSensors: cat weight 3999 g, waste 119 g, NH\u2083 45 ppb, CH\u2084 27 ppb.\nHealth: No anomalies detected\n\nI'm unable to view or compare the images of a litter box. If you have any other questions or need assistance, feel free to ask!"
+    }
+  ]
+}

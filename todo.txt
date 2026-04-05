@@ -46,4 +46,55 @@ have a unique identifier!
 5. Next week (tentative):
     a. Pour through the data.
     b. Work out how to get an initial operating run with hardware going.
-    
+
+
+CODE DIRECTIONS:
+
+I. Take time domain measurements:
+    A. Weight 
+    B. Image similarity to known cats.
+    C. Other sensors.
+    D. Save time domain measurements.
+    E. Save summaries of time domain measures as min/max/median/mean 
+II. Analyze results. Inspired heavily by IEEE Aero 2020 paper.
+    A. Short term analysis:
+        1. Eigenvalue/eigenvector.
+        2. Dominant subspace vs noise subspace.
+        3. Explained variance.
+            a. Important: long term changes in the vector subspace for each kitty
+        4. Expansion coefficeints.
+            a. Move beyond the simple vector Gaussian.
+            b. Use automatec clustering algorithms.
+            c. Analyze clusters and look for drift.
+            d. Important: long term application of cluster drift.
+    B. Long term analysis 
+        1. Using statistics above, trend min/max/mean/median.
+        2. Generate the percentile bands.
+        3. Trend min/max/mean/median and percentiles.
+        4. Look for significant deviations from trend.
+    C. Save waveforms.
+        1. Better analysis than the admittedly crude algorithsm of the 
+        IEEE Aero 2020 paper can be applied later.
+III. KEY STEPS
+    A. Waveform gathering.
+        1. For each box visit gather time domain waveforms of:
+            a. Image similarity to known kitties.
+            b. Weight measurements.
+            c. Other sensors.
+            d. Images (but limit to one week or to one month to avoid memory overload)
+    B. Short term analysis 
+        1. Using eigenvector/eigenvalue for initial system and store the 
+        expansions for each kitty and each sensor type.
+        2. Store clusters of expansion coefficients for cluster analysis and please 
+        move beyond simple vector Gaussian.
+    C. Long term analysis 
+        1. Trending of min/max/mean/median/percentiles 
+        2. Catch anomalous points w.r.t. trend.
+        3. Catch anomalous trends.
+    D. Note that the waveforms can be used for future better algorithms.
+    E. Note that images not just of the box but of the kitties can be used 
+    for AI based health detection.
+        1. For example upload perhaps two kitty images for each kitty per 
+        week to cloud for health check and warning.
+        2. And also upload the suspected anomalous litter box images.
+

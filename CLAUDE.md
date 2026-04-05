@@ -343,7 +343,7 @@ SensorCollector
   entries (using a short tick interval in test).
 - `stop()` terminates the background thread within 2 seconds.
 
-**Step 2 status: NOT STARTED**
+**Step 2 status: COMPLETE** — 38/38 tests pass.
 
 ---
 

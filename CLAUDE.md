@@ -261,7 +261,7 @@ state machine, DB writes — those come in later steps.
 - Config round-trip: load → check `window_minutes`, `samples_per_minute`,
   `channels` length, `trigger` keys.
 
-**Step 1 status: NOT STARTED**
+**Step 1 status: COMPLETE** — 42/42 tests pass. See `docs/step1_test_report.md`.
 
 ---
 

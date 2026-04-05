@@ -1,0 +1,52 @@
+{
+  "_comment": "Time-domain measurement system configuration. All time-domain modules read from this file. See CLAUDE.md §Time-Domain Measurement System for field descriptions.",
+
+  "window_minutes": 10,
+  "samples_per_minute": 12,
+
+  "channels": [
+    {
+      "name":    "weight_g",
+      "type":    "weight",
+      "enabled": true,
+      "_comment": "Box + litter + cat weight in grams from the scale."
+    },
+    {
+      "name":    "ammonia_ppb",
+      "type":    "ammonia",
+      "enabled": true,
+      "_comment": "Ammonia (NH3) concentration in parts-per-billion."
+    },
+    {
+      "name":    "methane_ppb",
+      "type":    "methane",
+      "enabled": true,
+      "_comment": "Methane (CH4) concentration in parts-per-billion."
+    },
+    {
+      "name":    "chip_id",
+      "type":    "chip_id",
+      "enabled": true,
+      "_comment": "Microchip / RFID reader output. String cat-ID or null when no chip detected."
+    },
+    {
+      "name":    "similarity",
+      "type":    "similarity",
+      "enabled": true,
+      "_comment": "CLIP similarity scores against every registered cat. Expanded at runtime into per-cat keys named similarity_<catname>. CLIP runs locally; no API cost per tick."
+    }
+  ],
+
+  "trigger": {
+    "weight_entry_delta_g":            300,
+    "weight_exit_delta_g":             200,
+    "chip_absent_consecutive":           3,
+    "similarity_entry_threshold":      0.70,
+    "similarity_exit_threshold":       0.50,
+    "similarity_sustained_peak_samples": 3,
+    "_comment": "weight_entry_delta_g: minimum weight rise above pre-visit baseline (g) to declare kitty_present. weight_exit_delta_g: minimum weight drop to declare kitty_absent. chip_absent_consecutive: null chip readings in a row before declaring kitty_absent. similarity_entry_threshold: minimum CLIP score to declare kitty_present. similarity_exit_threshold: score must fall below this on all cats before declaring kitty_absent. similarity_sustained_peak_samples (P): winning cat must exceed entry_threshold for at least P consecutive samples before the ID is accepted."
+  },
+
+  "image_retention_days": 7,
+  "_comment2": "Camera images from visits are deleted after this many days."
+}

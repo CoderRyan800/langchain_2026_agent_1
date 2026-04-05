@@ -283,6 +283,16 @@ class SensorCollector:
         The ``RollingBuffer`` to append measurements to.  Usually shared with
         the ``VisitTrigger`` (Step 3) so the trigger can read the most recent
         samples immediately after they are written.
+    on_sample:
+        Optional callable invoked after every ``_sample_once()`` with the
+        assembled values dict as its sole argument.  Wire ``VisitTrigger.check``
+        here to integrate the state machine with the collector::
+
+            trigger   = VisitTrigger(config, buffer, on_visit_complete=…)
+            collector = SensorCollector(config, drivers, buffer,
+                                        on_sample=trigger.check)
+
+        Defaults to ``None`` (no callback).
 
     Thread safety
     -------------
@@ -296,6 +306,7 @@ class SensorCollector:
         config: dict,
         drivers: dict[str, BaseDriver],
         buffer: RollingBuffer,
+        on_sample: Optional[Any] = None,
     ) -> None:
         # Build the ordered list of enabled channels from the config.
         # Each element is a (name, type) tuple, e.g. ("weight_g", "weight").
@@ -305,8 +316,9 @@ class SensorCollector:
             if ch.get("enabled", False)
         ]
 
-        self._drivers = drivers
-        self._buffer  = buffer
+        self._drivers   = drivers
+        self._buffer    = buffer
+        self._on_sample = on_sample   # optional post-tick callback
 
         # Tick interval in seconds — derived from config so tests can override
         # by passing a custom config with a higher samples_per_minute.
@@ -364,6 +376,10 @@ class SensorCollector:
                 values[channel_name] = reading
 
         self._buffer.append(timestamp, values)
+
+        # Notify the optional post-tick callback (e.g. VisitTrigger.check).
+        if self._on_sample is not None:
+            self._on_sample(values)
 
     # ------------------------------------------------------------------
     # Background thread control

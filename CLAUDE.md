@@ -435,7 +435,7 @@ on_visit_complete(
   rise-then-fall.
 - `reset()` returns to KITTY_ABSENT mid-visit without firing the callback.
 
-**Step 3 status: NOT STARTED**
+**Step 3 status: COMPLETE** — 34/34 tests pass.
 
 ---
 

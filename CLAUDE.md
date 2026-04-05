@@ -131,3 +131,413 @@ Baseline result (seed=42): 70% identity accuracy (Anna 100%, Marina 80%, Luna 83
 - `waste_weight_g` is derived at exit time by reading `weight_pre_g` from the open visit before the UPDATE
 - Pytest fixtures patch `DB_PATH`, `CHROMA_PATH`, `IMAGES_DIR`, and `PROJECT_ROOT` to `tmp_path` for full isolation; `_identify_cat` and `_run_gpt4o_vision` are stubbed in all non-slow tests
 - Phase 7 uses a dedicated Chroma subdirectory (`chroma_phase7/`) to avoid file-lock conflicts with Phase 6's wipe
+
+---
+
+## Time-Domain Measurement System (branch: feature/time_domain_measurements)
+
+This system adds continuous, time-series data capture to the litter box
+monitor.  Instead of recording only per-visit snapshots at entry and exit
+events, it maintains a **rolling buffer** of every sensor channel at a fixed
+sample rate.  When a visit is detected the full M-minute window of vector data
+is captured, analysed, and stored alongside the existing visit record.
+
+The implementation is broken into four steps executed one at a time.  Each
+step is committed and evaluated before the next begins.
+
+---
+
+### Configuration — `src/litterbox/td_config.json`
+
+A single JSON file controls everything.  It is loaded once at startup.
+All time-domain modules read from this file; nothing is hard-coded.
+
+```jsonc
+{
+  "window_minutes": 10,        // M — rolling buffer length in minutes
+  "samples_per_minute": 12,    // N — sample rate (12 = one every 5 s)
+
+  "channels": [
+    { "name": "weight_g",        "type": "weight",     "enabled": true  },
+    { "name": "ammonia_ppb",     "type": "ammonia",    "enabled": true  },
+    { "name": "methane_ppb",     "type": "methane",    "enabled": true  },
+    { "name": "chip_id",         "type": "chip_id",    "enabled": true  },
+    { "name": "similarity",      "type": "similarity", "enabled": true  }
+  ],
+
+  "trigger": {
+    "weight_entry_delta_g":   300,   // min weight rise to declare kitty_present
+    "weight_exit_delta_g":    200,   // min weight drop to declare kitty_absent
+    "chip_absent_consecutive": 3,    // null chip readings in a row → kitty_absent
+    "similarity_entry_threshold": 0.70, // min CLIP score to declare kitty_present
+    "similarity_exit_threshold":  0.50  // score must fall below this → kitty_absent
+  },
+
+  "image_retention_days": 7    // camera images from visits deleted after this many days
+}
+```
+
+Key design notes:
+- `window_minutes` × `samples_per_minute` = total buffer depth (default 120 samples).
+- The `channels` list is the **only** place where enabled sensors are defined.
+  A box without a camera omits `similarity`; a box without a chip reader
+  omits `chip_id`.  The rest of the system adapts automatically.
+- The `similarity` channel is **dynamic**: the buffer stores one similarity
+  score per registered cat at each sample tick.  The column names are derived
+  at runtime from the registered cat list (e.g. `similarity_whiskers`,
+  `similarity_anna`).  K varies with the number of registered cats.
+- The `trigger` block holds all state-machine thresholds.  Any threshold
+  can be tuned without touching code.
+
+---
+
+### Step 1 — Generic Rolling Buffer (`src/litterbox/time_buffer.py`)
+
+**Goal:** A self-contained, hardware-agnostic data structure that holds
+M × N time-stamped measurement dicts in a circular sliding window.
+
+**Key classes / functions:**
+
+```
+RollingBuffer
+  __init__(window_minutes, samples_per_minute)
+      Computes max_len = window_minutes × samples_per_minute.
+      Allocates a collections.deque(maxlen=max_len).
+      Creates a threading.Lock for thread safety.
+
+  append(timestamp: datetime, values: dict[str, float | str | None]) → None
+      Acquires lock, appends (timestamp, values) to the deque.
+      The deque automatically discards the oldest entry when full.
+
+  snapshot() → list[dict]
+      Returns a shallow copy of the entire buffer as a list of
+      {"timestamp": ..., "values": {...}} dicts, oldest first.
+
+  get_channel(name: str) → list[float | str | None]
+      Returns a time-ordered list of values for one named channel.
+      Missing keys in a sample produce None in the output list.
+
+  get_timestamps() → list[datetime]
+      Returns the timestamp column only.
+
+  window_span_seconds() → float
+      Returns (newest_ts - oldest_ts).total_seconds() or 0.0 if < 2 entries.
+
+  clear() → None
+      Empties the buffer (used by tests and simulator).
+```
+
+**Configuration loading:**
+
+```
+load_td_config(path: str | Path | None = None) → dict
+    Reads td_config.json (default: src/litterbox/td_config.json).
+    Returns the parsed dict.
+    Raises FileNotFoundError with a clear message if missing.
+    Validates required top-level keys (window_minutes, samples_per_minute,
+    channels, trigger, image_retention_days) and raises ValueError if any
+    are absent or have wrong types.
+```
+
+**What Step 1 does NOT include:** hardware drivers, sample scheduling,
+state machine, DB writes — those come in later steps.
+
+**Files created in Step 1:**
+- `src/litterbox/time_buffer.py` — `RollingBuffer` class + `load_td_config()`
+- `src/litterbox/td_config.json` — default configuration file
+- `tests/test_time_buffer.py` — pytest unit tests (no LLM, no hardware)
+
+**Tests for Step 1:**
+- Buffer respects `maxlen`: inserting 130 samples into a 120-sample buffer
+  leaves exactly 120 entries (oldest 10 gone).
+- `get_channel()` returns correct values and None for missing keys.
+- `window_span_seconds()` returns correct elapsed time.
+- `snapshot()` returns a copy (mutating it does not affect the buffer).
+- `load_td_config()` raises on missing file and on missing required keys.
+- Config round-trip: load → check `window_minutes`, `samples_per_minute`,
+  `channels` length, `trigger` keys.
+
+**Step 1 status: NOT STARTED**
+
+---
+
+### Step 2 — Sensor Collector (`src/litterbox/sensor_collector.py`)
+
+**Goal:** Apply the `RollingBuffer` to the actual sensor channels defined in
+the config.  Hardware is accessed through pluggable driver objects so the
+collector can run with mock drivers during tests and with real hardware in
+production.
+
+**Design — hardware driver interface:**
+
+Each channel type is served by a driver that implements a single method:
+
+```
+class BaseDriver:
+    def read(self) -> float | str | None:
+        """Return the current reading, or None if unavailable."""
+```
+
+Concrete drivers (one per channel type):
+
+| Driver class | Channel type | Production source | Mock behaviour |
+|---|---|---|---|
+| `WeightDriver` | `weight` | scale hardware via serial/I²C | Returns configurable static value + Gaussian noise |
+| `AmmoniaDriver` | `ammonia` | MQ-135 / ENS160 ADC | Returns configurable static value + noise |
+| `MethaneDriver` | `methane` | MQ-4 / MQ-9 ADC | Returns configurable static value + noise |
+| `ChipIdDriver` | `chip_id` | RFID/NFC reader | Returns configurable cat name or None |
+| `SimilarityDriver` | `similarity` | CLIP embedder + current camera frame | Returns dict `{cat_name: score}` for all registered cats |
+
+`SimilarityDriver` is the only driver whose `read()` returns a `dict` rather
+than a scalar.  The collector expands it into per-cat channels named
+`similarity_<catname>` before writing to the buffer.
+
+**`SensorCollector` class:**
+
+```
+SensorCollector
+  __init__(config: dict, drivers: dict[str, BaseDriver], buffer: RollingBuffer)
+      Reads the enabled channel list from config.
+      Stores the driver map and the shared RollingBuffer.
+
+  _sample_once() → None
+      Calls driver.read() for each enabled channel.
+      Expands similarity dict into per-cat keys.
+      Calls buffer.append(datetime.utcnow(), values).
+
+  start() → None
+      Launches a daemon thread that calls _sample_once() every
+      (60 / samples_per_minute) seconds.
+
+  stop() → None
+      Signals the daemon thread to exit cleanly.
+```
+
+**Files created in Step 2:**
+- `src/litterbox/sensor_collector.py` — `BaseDriver`, all driver classes,
+  `SensorCollector`
+- `tests/test_sensor_collector.py` — pytest unit tests with mock drivers
+
+**Tests for Step 2:**
+- `_sample_once()` with mock drivers populates the buffer correctly.
+- Similarity dict is correctly expanded to `similarity_anna`, `similarity_luna`, etc.
+- Disabled channels (enabled: false) are not sampled.
+- SensorCollector with mock drivers runs for 3 ticks and produces 3 buffer
+  entries (using a short tick interval in test).
+- `stop()` terminates the background thread within 2 seconds.
+
+**Step 2 status: NOT STARTED**
+
+---
+
+### Step 3 — State Machine and Visit Trigger (`src/litterbox/visit_trigger.py`)
+
+**Goal:** Watch the rolling buffer, detect kitty-present and kitty-absent
+transitions, and — on each kitty-absent transition — capture the M-minute
+buffer snapshot and initiate the visit analysis pipeline.
+
+**State machine:**
+
+```
+States:   KITTY_ABSENT  ←──────────────┐
+               │                        │
+               │  (first-stage trigger) │  (second-stage trigger)
+               ▼                        │
+          KITTY_PRESENT ────────────────┘
+               │
+               │  (on PRESENT → ABSENT transition)
+               ▼
+          capture_visit_snapshot()
+```
+
+**First-stage trigger (ABSENT → PRESENT):** any one of:
+- Weight reading exceeds `(baseline_weight + weight_entry_delta_g)` where
+  `baseline_weight` is the rolling median of the last N weight readings before
+  the transition.
+- `chip_id` channel returns a non-null value.
+- Any `similarity_<cat>` channel exceeds `similarity_entry_threshold`.
+
+**Second-stage trigger (PRESENT → ABSENT):** any one of:
+- Weight reading falls below `(baseline_weight + weight_exit_delta_g)` after
+  having been elevated.
+- `chip_id` channel has returned None for `chip_absent_consecutive` consecutive
+  samples.
+- All `similarity_<cat>` channels have fallen below `similarity_exit_threshold`
+  for `chip_absent_consecutive` consecutive samples.
+
+**`VisitTrigger` class:**
+
+```
+VisitTrigger
+  __init__(config: dict, buffer: RollingBuffer, on_visit_complete: Callable)
+      Stores config thresholds and the callback.
+      Initialises state = KITTY_ABSENT.
+      Computes baseline_weight from the first N samples in the buffer.
+
+  check(latest_values: dict) → None
+      Called by SensorCollector after each _sample_once().
+      Evaluates first-stage conditions if state == KITTY_ABSENT.
+      Evaluates second-stage conditions if state == KITTY_PRESENT.
+      Calls _on_entry() or _on_exit() as appropriate.
+
+  _on_entry() → None
+      Logs the transition with timestamp.
+      Sets state = KITTY_PRESENT.
+      Records entry_time.
+
+  _on_exit() → None
+      Logs the transition with timestamp.
+      Sets state = KITTY_ABSENT.
+      Calls on_visit_complete(snapshot, entry_time, exit_time).
+
+  reset() → None
+      Forces state back to KITTY_ABSENT (used by tests and simulator).
+```
+
+The `on_visit_complete` callback receives:
+```python
+on_visit_complete(
+    snapshot:    list[dict],   # full M-minute buffer at moment of exit
+    entry_time:  datetime,
+    exit_time:   datetime,
+)
+```
+
+**Files created in Step 3:**
+- `src/litterbox/visit_trigger.py` — `VisitTrigger`, state constants
+- `tests/test_visit_trigger.py` — pytest unit tests
+
+**Tests for Step 3:**
+- Feed a synthetic weight ramp: flat → sharp rise → sharp fall.
+  Assert callback fires exactly once, entry_time and exit_time are correct.
+- Chip-ID trigger: None × 5, non-null × 3, None × 4 consecutive → fires.
+- Similarity trigger: all below threshold, one rises above, all fall below → fires.
+- Multiple cats active simultaneously (two similarity scores elevated): still
+  fires exactly once on exit.
+- No spurious trigger when weight oscillates around threshold without a clean
+  rise-then-fall.
+- `reset()` returns to KITTY_ABSENT mid-visit without firing the callback.
+
+**Step 3 status: NOT STARTED**
+
+---
+
+### Step 4 — Visit Capture, Analysis, and Storage
+
+**Goal:** When the `on_visit_complete` callback fires, analyse the buffer
+snapshot to produce a cat identification, store the visit record (including the
+full vector snapshot), save camera images from the visit window, and integrate
+with the existing `confirm_identity` / tentative-ID flow.
+
+**Cat identification from the snapshot:**
+
+Priority order:
+1. **Chip ID** — if any sample in the visit window has a non-null `chip_id`,
+   use the most frequent non-null value.  Mark `is_confirmed = True`.
+2. **Similarity time series** — compute per-cat mean similarity over the visit
+   window.  If the highest-mean cat exceeds `similarity_entry_threshold`,
+   record as tentative ID (mirrors existing CLIP pipeline behaviour).
+3. **Unknown** — if neither applies, record as unknown and flag for human
+   review.
+
+**Camera image handling:**
+
+- The `similarity` channel driver holds a reference to the camera.  At each
+  sample tick it also saves a frame to a temporary ring buffer (in memory or
+  on disk, configurable).
+- On visit completion, frames captured between `entry_time` and `exit_time`
+  are written to `images/visits/YYYY-MM-DD/<visit_uuid>/frame_NNNN.jpg`.
+- A background task runs daily and deletes visit image directories older than
+  `image_retention_days` (default 7).
+
+**New DB table — `td_visits`:**
+
+```sql
+CREATE TABLE td_visits (
+    td_visit_id       INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_time        TIMESTAMP NOT NULL,
+    exit_time         TIMESTAMP NOT NULL,
+    chip_id           TEXT,                    -- raw chip ID string, if available
+    tentative_cat_id  INTEGER REFERENCES cats(cat_id),
+    confirmed_cat_id  INTEGER REFERENCES cats(cat_id),
+    is_confirmed      BOOLEAN DEFAULT FALSE,
+    id_method         TEXT,                    -- 'chip', 'similarity', 'unknown'
+    top_similarity    REAL,                    -- highest mean score across cats
+    snapshot_json     TEXT NOT NULL,           -- full M-minute buffer as JSON
+    images_dir        TEXT,                    -- relative path to visit image folder
+    health_notes      TEXT,
+    is_anomalous      BOOLEAN DEFAULT FALSE,
+    created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+**`VisitAnalyser` class (`src/litterbox/visit_analyser.py`):**
+
+```
+VisitAnalyser
+  __init__(config: dict)
+
+  analyse(snapshot, entry_time, exit_time) → TdVisitRecord
+      Runs the ID priority logic above.
+      Returns a dataclass with all fields needed for DB insertion.
+
+  save(record: TdVisitRecord, images: list[Path]) → int
+      Writes to td_visits, copies images to permanent storage.
+      Returns the new td_visit_id.
+      Triggers image deletion sweep for entries older than retention policy.
+```
+
+**Integration with existing tools:**
+
+- `confirm_identity` tool gains an optional `td_visit_id` parameter so owners
+  can confirm time-domain visits the same way they confirm snapshot visits.
+- `get_unconfirmed_visits` returns both `visits` and `td_visits` rows.
+- Health analysis: the same `build_health_prompt` / `parse_health_response`
+  pipeline is run against the entry and exit frames from the image folder if
+  a camera is present.
+
+**Files created in Step 4:**
+- `src/litterbox/visit_analyser.py` — `VisitAnalyser`, `TdVisitRecord`
+- `src/litterbox/image_retention.py` — deletion sweep utility
+- `src/litterbox/db.py` — `td_visits` table added to `init_db()` with migration
+
+**Tests for Step 4:**
+- `analyse()` returns chip-ID result when chip column is populated.
+- `analyse()` returns correct tentative cat when similarity columns are above
+  threshold and chip column is absent.
+- `analyse()` returns unknown when all scores are below threshold.
+- `save()` inserts a row and returns a valid `td_visit_id`.
+- Deletion sweep removes image directories older than retention window and
+  leaves newer ones intact.
+- `confirm_identity` with `td_visit_id` updates the correct table.
+
+**Step 4 status: NOT STARTED**
+
+---
+
+### Time-Domain Module — File Map
+
+```
+src/litterbox/
+├── td_config.json          # configuration (window, sample rate, channels, thresholds)
+├── time_buffer.py          # Step 1 — RollingBuffer + load_td_config()
+├── sensor_collector.py     # Step 2 — BaseDriver, all drivers, SensorCollector
+├── visit_trigger.py        # Step 3 — VisitTrigger state machine
+├── visit_analyser.py       # Step 4 — VisitAnalyser, TdVisitRecord
+└── image_retention.py      # Step 4 — visit image deletion sweep
+
+tests/
+├── test_time_buffer.py     # Step 1 tests
+├── test_sensor_collector.py# Step 2 tests
+├── test_visit_trigger.py   # Step 3 tests
+└── test_visit_analyser.py  # Step 4 tests
+```
+
+### Time-Domain Module — Step Status Tracker
+
+| Step | Description | Status |
+|------|-------------|--------|
+| 1 | `RollingBuffer` + config loading | NOT STARTED |
+| 2 | `SensorCollector` + hardware driver interface | NOT STARTED |
+| 3 | `VisitTrigger` state machine | NOT STARTED |
+| 4 | `VisitAnalyser`, DB storage, image retention | NOT STARTED |

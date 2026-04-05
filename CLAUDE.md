@@ -166,11 +166,15 @@ All time-domain modules read from this file; nothing is hard-coded.
   ],
 
   "trigger": {
-    "weight_entry_delta_g":   300,   // min weight rise to declare kitty_present
-    "weight_exit_delta_g":    200,   // min weight drop to declare kitty_absent
-    "chip_absent_consecutive": 3,    // null chip readings in a row → kitty_absent
-    "similarity_entry_threshold": 0.70, // min CLIP score to declare kitty_present
-    "similarity_exit_threshold":  0.50  // score must fall below this → kitty_absent
+    "weight_entry_delta_g":        300,  // min weight rise to declare kitty_present
+    "weight_exit_delta_g":         200,  // min weight drop to declare kitty_absent
+    "chip_absent_consecutive":       3,  // null chip readings in a row → kitty_absent
+    "similarity_entry_threshold":  0.70, // min CLIP score to declare kitty_present
+    "similarity_exit_threshold":   0.50, // score must fall below this → kitty_absent
+    "similarity_sustained_peak_samples": 3  // P — top cat must exceed entry_threshold
+                                            //     for at least P consecutive samples
+                                            //     before ID is accepted (guards against
+                                            //     a brief spike from a wrong cat)
   },
 
   "image_retention_days": 7    // camera images from visits deleted after this many days
@@ -291,6 +295,19 @@ Concrete drivers (one per channel type):
 `SimilarityDriver` is the only driver whose `read()` returns a `dict` rather
 than a scalar.  The collector expands it into per-cat channels named
 `similarity_<catname>` before writing to the buffer.
+
+**Important: CLIP-only on the continuous stream.**  `SimilarityDriver` uses
+the local CLIP embedder exclusively — no GPT-4o calls during continuous
+monitoring.  GPT-4o confirmation is reserved for post-visit analysis in
+Step 4, applied to a small number of selected frames only.  This keeps the
+per-tick cost at zero beyond local inference.
+
+**Missing frames.**  If the camera cannot capture a usable frame at a given
+tick (motion blur, lid closed, cat's back to lens, etc.), `SimilarityDriver`
+returns `None` for every cat rather than 0.0.  The collector writes these as
+absent keys in the values dict.  The buffer therefore stores genuine absences,
+not spurious zero scores.  Downstream code must treat missing keys as `NaN`,
+not zero.
 
 **`SensorCollector` class:**
 
@@ -429,16 +446,71 @@ snapshot to produce a cat identification, store the visit record (including the
 full vector snapshot), save camera images from the visit window, and integrate
 with the existing `confirm_identity` / tentative-ID flow.
 
-**Cat identification from the snapshot:**
+**Similarity DataFrame — the core data structure for camera-based ID:**
 
-Priority order:
+For a visit bounded by `entry_time` and `exit_time`, the analyser extracts
+the relevant rows from the buffer snapshot and constructs a pandas DataFrame:
+
+```
+                        anna    luna   marina   natasha   whiskers
+2026-04-04 22:10:00    0.91    0.23     0.18      0.21       0.19
+2026-04-04 22:10:05    0.89    0.25     0.20      0.19       0.22
+2026-04-04 22:10:10     NaN     NaN      NaN       NaN        NaN   ← no frame
+2026-04-04 22:10:15    0.93    0.22     0.17      0.20       0.18
+...
+```
+
+Design rules for the DataFrame:
+
+- **Index**: `datetime` timestamps from the buffer — not integer row numbers.
+  This enables natural time-slicing (`df.loc[entry_time:exit_time]`) and
+  correlation with weight/gas channels.
+- **Columns**: one per registered cat, named by cat name (not `similarity_anna`
+  — the prefix is stripped when building the DataFrame).  K columns; K is
+  determined at analysis time from the registered cat list and may vary between
+  visits if cats are registered or removed.
+- **Values**: CLIP cosine similarity in [0, 1].  Missing camera frames are
+  stored as `NaN` (not 0.0).  Using `skipna=True` in all aggregations ensures
+  missing frames do not bias the mean downward.
+- **Shape**: rows = number of buffer samples between `entry_time` and
+  `exit_time` (variable across visits); columns = K (variable across
+  registrations).
+- **Two windows**:
+  - *Full window* — all M × N samples in the buffer at moment of exit.
+    Serialised to JSON and stored in `td_visits.snapshot_json` for owner
+    review and future re-analysis.  Captures pre-entry and post-exit context.
+  - *Visit window* — rows trimmed to `[entry_time, exit_time]`.  Used for ID
+    computation only.  Not stored separately.
+- **Construction**: the `RollingBuffer` stores flat dicts
+  (`{"similarity_anna": 0.91, "similarity_luna": 0.23, ...}`).  The
+  `VisitAnalyser` is solely responsible for pivoting these into a DataFrame.
+  The buffer itself has no knowledge of DataFrames.
+- **Serialisation**: `df.to_json(orient="split")` stores index, columns, and
+  data efficiently.  `pd.read_json(..., orient="split")` reconstructs it
+  exactly, preserving the timestamp index and NaN values.
+
+**Cat identification from the snapshot — priority order:**
+
 1. **Chip ID** — if any sample in the visit window has a non-null `chip_id`,
    use the most frequent non-null value.  Mark `is_confirmed = True`.
-2. **Similarity time series** — compute per-cat mean similarity over the visit
-   window.  If the highest-mean cat exceeds `similarity_entry_threshold`,
-   record as tentative ID (mirrors existing CLIP pipeline behaviour).
-3. **Unknown** — if neither applies, record as unknown and flag for human
-   review.
+   No DataFrame analysis needed.
+
+2. **Similarity DataFrame** — applicable only when the `similarity` channel
+   is enabled.  Steps:
+   a. Build the visit-window DataFrame from buffer rows in `[entry_time, exit_time]`.
+   b. Compute `col_means = df.mean(skipna=True)` — per-cat mean over the visit.
+   c. Winning cat = `col_means.idxmax()`.
+   d. **Sustained-peak gate**: verify that the winning cat's score exceeded
+      `similarity_entry_threshold` for at least `similarity_sustained_peak_samples`
+      (P) consecutive samples in the visit window.  This guards against a
+      brief spike from a passing wrong cat.
+   e. If the winning mean exceeds `similarity_entry_threshold` **and** the
+      sustained-peak gate passes → record as tentative ID (mirrors existing
+      CLIP pipeline behaviour).
+   f. Otherwise → Unknown.
+
+3. **Unknown** — if neither chip ID nor similarity produces a result, record
+   as unknown and flag for human review.
 
 **Camera image handling:**
 
@@ -502,10 +574,20 @@ VisitAnalyser
 - `src/litterbox/db.py` — `td_visits` table added to `init_db()` with migration
 
 **Tests for Step 4:**
-- `analyse()` returns chip-ID result when chip column is populated.
+- `analyse()` returns chip-ID result (is_confirmed=True) when chip column is
+  populated; DataFrame analysis is skipped entirely.
 - `analyse()` returns correct tentative cat when similarity columns are above
-  threshold and chip column is absent.
-- `analyse()` returns unknown when all scores are below threshold.
+  threshold, sustained-peak gate passes, and chip column is absent.
+- `analyse()` returns Unknown when all column means are below threshold.
+- `analyse()` returns Unknown when the winning cat's mean exceeds threshold
+  but the sustained-peak gate fails (spike shorter than P samples).
+- DataFrame construction: buffer with 3 cats and 5 ticks (including 1 NaN
+  tick) produces a 5×3 DataFrame with correct NaN placement and timestamp index.
+- `df.mean(skipna=True)` gives correct per-cat means that exclude NaN rows;
+  verify that a spurious 0.0 would have incorrectly lowered the mean (NaN
+  correctness justification test).
+- Serialisation round-trip: `to_json(orient="split")` → `read_json` restores
+  the same index, columns, and NaN positions.
 - `save()` inserts a row and returns a valid `td_visit_id`.
 - Deletion sweep removes image directories older than retention window and
   leaves newer ones intact.

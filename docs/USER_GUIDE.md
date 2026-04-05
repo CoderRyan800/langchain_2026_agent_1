@@ -17,6 +17,7 @@ This guide covers day-to-day use of both agents in this project.
 9. [Direct Database Access (SQLite)](#9-direct-database-access-sqlite)
 10. [Data and Storage](#10-data-and-storage)
 11. [Troubleshooting](#11-troubleshooting)
+12. [Time-Domain Measurement System](#12-time-domain-measurement-system)
 
 ---
 
@@ -1215,3 +1216,481 @@ sqlite> SELECT visit_id, entry_time, cat_weight_g, waste_weight_g,
 
 This lets you verify sensor values, health flags, and cat IDs without going
 through the agent layer.
+
+---
+
+## 12. Time-Domain Measurement System
+
+> **Branch:** `feature/time_domain_measurements`
+>
+> This section describes the continuous time-series layer that supplements the
+> per-visit snapshot system described in earlier sections.  It is implemented
+> in three steps and uses no LLM calls during normal monitoring — all real-time
+> processing is local.
+
+### 12.1 Overview
+
+The per-visit system (Sections 3–9) captures a single weight reading and a
+single image at entry and exit.  The time-domain system adds **continuous
+sampling**: it maintains a rolling 10-minute buffer of every sensor channel at
+a 5-second interval, detects visit boundaries automatically from the data
+stream, and fires a callback when a complete visit is detected.
+
+```
+Physical sensors / camera
+        │
+        ▼
+  SensorCollector          ← one sample every 5 s
+        │ buffer.append()
+        ▼
+   RollingBuffer            ← circular, 120 samples × 10 minutes
+        │ buffer.snapshot() (on visit complete)
+        ▼
+   VisitTrigger             ← state machine: KITTY_ABSENT ↔ KITTY_PRESENT
+        │ on_visit_complete callback
+        ▼
+  (Step 4 — VisitAnalyser)  ← cat ID from the full time-series window
+```
+
+### 12.2 Configuration — `td_config.json`
+
+All time-domain settings live in one file:
+
+```
+src/litterbox/td_config.json
+```
+
+```jsonc
+{
+  "window_minutes":     10,   // rolling buffer length
+  "samples_per_minute": 12,   // one sample every 5 seconds
+
+  "channels": [
+    { "name": "weight_g",    "type": "weight",     "enabled": true  },
+    { "name": "ammonia_ppb", "type": "ammonia",    "enabled": true  },
+    { "name": "methane_ppb", "type": "methane",    "enabled": true  },
+    { "name": "chip_id",     "type": "chip_id",    "enabled": true  },
+    { "name": "similarity",  "type": "similarity", "enabled": true  }
+  ],
+
+  "trigger": {
+    "weight_entry_delta_g":            300,  // g above baseline to declare entry
+    "weight_exit_delta_g":             200,  // g above baseline to declare exit
+    "chip_absent_consecutive":           3,  // null chip readings in a row → exit
+    "similarity_entry_threshold":      0.70, // CLIP score to declare entry
+    "similarity_exit_threshold":       0.50, // score must fall below this → exit
+    "similarity_sustained_peak_samples": 3   // reserved for Step 4 analysis
+  },
+
+  "image_retention_days": 7
+}
+```
+
+**Disabling sensors:** set `"enabled": false` for any channel whose hardware
+is not installed.  The collector skips that channel entirely; the rest of the
+system adapts automatically.
+
+**Tuning thresholds:** edit the `trigger` block without touching any code.
+Increase `weight_entry_delta_g` if sensor noise causes false entries; decrease
+`similarity_entry_threshold` if the camera angle produces lower scores.
+
+---
+
+### 12.3 Step 1 — Rolling Buffer (`time_buffer.py`)
+
+The `RollingBuffer` is the data backbone of the entire system.  It is a
+thread-safe circular buffer that holds time-stamped measurement dictionaries.
+
+```python
+from litterbox.time_buffer import RollingBuffer, load_td_config
+from datetime import datetime, timezone
+
+cfg = load_td_config()          # reads td_config.json
+buf = RollingBuffer(
+    window_minutes     = cfg["window_minutes"],
+    samples_per_minute = cfg["samples_per_minute"],
+)
+# capacity = 10 × 12 = 120 samples (10 minutes at one every 5 s)
+
+# Append a measurement
+buf.append(
+    datetime.now(timezone.utc),
+    {"weight_g": 5412.3, "ammonia_ppb": 9.1, "chip_id": None}
+)
+
+# Read back
+print(buf.get_channel("weight_g"))     # [5412.3]
+print(buf.get_channel("chip_id"))      # [None]
+print(buf.window_span_seconds())       # 0.0  (only one entry)
+print(len(buf))                        # 1
+print(buf.is_full())                   # False
+```
+
+**Key behaviours:**
+
+- When the buffer reaches capacity (120 entries), the oldest entry is
+  automatically discarded on each new `append()`.
+- All public methods are protected by a `threading.Lock`.  A background
+  sampling thread and the main thread can read/write concurrently.
+- Missing keys in a values dict are stored as absent (not zero).  Calling
+  `get_channel("ammonia_ppb")` when some entries lacked that key returns
+  `None` for those positions.
+
+**Converting to a pandas DataFrame:**
+
+```python
+# All channels
+df_all = buf.to_dataframe()
+
+# Similarity channels only — prefix is stripped from column names
+df_sim = buf.to_dataframe(channel_prefix="similarity_")
+# columns: ["anna", "luna", "marina", ...]
+# index:   datetime timestamps
+# values:  CLIP scores, NaN where the camera had no frame
+
+# Time-slice to a visit window
+df_visit = buf.to_dataframe(
+    channel_prefix = "similarity_",
+    start          = entry_time,
+    end            = exit_time,
+)
+```
+
+**Why NaN, not 0?**  A missing camera frame is not a score of zero.  If the
+middle frame of a 3-frame visit is missing and stored as 0, the mean drops
+from 0.90 to 0.60 — below the identification threshold, causing a false
+"Unknown" result.  NaN with `skipna=True` gives the correct 0.90.
+
+---
+
+### 12.4 Step 2 — Sensor Collector (`sensor_collector.py`)
+
+The `SensorCollector` drives the buffer from actual (or mock) hardware.
+
+#### Driver interface
+
+Every sensor is accessed through a `BaseDriver` subclass that implements one
+method:
+
+```python
+class BaseDriver(ABC):
+    def read(self) -> float | str | dict | None:
+        """Return the current reading, or None if unavailable."""
+```
+
+| Driver class | Channel type | Returns |
+|---|---|---|
+| `WeightDriver` | `weight` | `float` (grams) or `None` |
+| `AmmoniaDriver` | `ammonia` | `float` (ppb) or `None` |
+| `MethaneDriver` | `methane` | `float` (ppb) or `None` |
+| `ChipIdDriver` | `chip_id` | `str` (cat name) or `None` |
+| `SimilarityDriver` | `similarity` | `dict[cat_name, score]` or `None` |
+
+All five classes act as **mocks** in tests and simulation.  In production,
+subclass the appropriate driver and override `read()` with real hardware I/O.
+
+#### Constructing and running the collector
+
+```python
+from litterbox.sensor_collector import (
+    SensorCollector, WeightDriver, AmmoniaDriver,
+    MethaneDriver, ChipIdDriver, SimilarityDriver,
+)
+
+drivers = {
+    "weight":     WeightDriver(base_value=5400.0, noise_sigma=20.0),
+    "ammonia":    AmmoniaDriver(base_value=8.0,   noise_sigma=1.0),
+    "methane":    MethaneDriver(base_value=5.0,   noise_sigma=0.8),
+    "chip_id":    ChipIdDriver(cat_name=None),       # no chip reader
+    "similarity": SimilarityDriver(cat_scores=None), # no camera yet
+}
+
+collector = SensorCollector(
+    config   = cfg,
+    drivers  = drivers,
+    buffer   = buf,
+    on_sample = None,   # wire VisitTrigger.check here (see §12.5)
+)
+
+collector.start()   # launches daemon thread
+# ... runs in background at 5-second intervals ...
+collector.stop()    # clean shutdown; wait for thread to exit
+```
+
+**Similarity expansion:** when the `SimilarityDriver` returns
+`{"anna": 0.18, "luna": 0.85}`, the collector writes
+`{"similarity_anna": 0.18, "similarity_luna": 0.85}` into the buffer — one
+key per cat, with the prefix added automatically.
+
+**Missing frames:** if the camera cannot produce a usable frame this tick,
+`SimilarityDriver` returns `None`.  The collector writes nothing for that
+tick's similarity keys.  The buffer entry simply lacks them, which the
+DataFrame converts to `NaN`.
+
+**CLIP-only on the continuous stream:** the `SimilarityDriver` runs the local
+CLIP model on every tick.  GPT-4o is never called during continuous monitoring
+— it is reserved for post-visit confirmation in Step 4.  This keeps the
+per-tick cost at zero beyond local CPU/GPU inference.
+
+---
+
+### 12.5 Step 3 — Visit Trigger (`visit_trigger.py`)
+
+The `VisitTrigger` watches each tick's values dict and transitions between
+two states:
+
+```
+KITTY_ABSENT  ──── first-stage trigger ───► KITTY_PRESENT
+                                                  │
+              ◄─── second-stage trigger ──────────┘
+                   (fires on_visit_complete)
+```
+
+#### Entry triggers (ABSENT → PRESENT)
+
+Any **one** of the following fires the transition:
+
+| Condition | Default threshold |
+|-----------|-------------------|
+| `weight_g > baseline + weight_entry_delta_g` | +300 g above rolling median |
+| `chip_id` is non-null | any chip detected |
+| Any `similarity_<cat>` > `similarity_entry_threshold` | 0.70 |
+
+The baseline weight is the **median** of all weight readings currently in the
+buffer.  Median is used instead of mean to be robust against outliers.
+
+#### Exit triggers (PRESENT → ABSENT)
+
+Any **one** of the following fires the callback:
+
+| Condition | Default threshold |
+|-----------|-------------------|
+| `weight_g < baseline + weight_exit_delta_g` | +200 g (100 g hysteresis below entry) |
+| `chip_id` has been `None` for N consecutive ticks | N = 3 |
+| All `similarity_<cat>` have been < `similarity_exit_threshold` for N consecutive ticks | 0.50, N = 3 |
+
+The 100 g hysteresis band between the entry (300 g) and exit (200 g) thresholds
+prevents rapid oscillation around the boundary from producing spurious entry/exit pairs.
+
+#### Wiring trigger to collector
+
+```python
+from litterbox.visit_trigger import VisitTrigger, KITTY_ABSENT, KITTY_PRESENT
+
+visits_completed = []
+
+def handle_visit(snapshot, entry_time, exit_time):
+    """Called once when a complete visit is detected."""
+    print(f"Visit: {entry_time} → {exit_time}  ({len(snapshot)} buffer samples)")
+    visits_completed.append((snapshot, entry_time, exit_time))
+
+trigger = VisitTrigger(
+    config             = cfg,
+    buffer             = buf,
+    on_visit_complete  = handle_visit,
+)
+
+# Wire trigger into collector: check() is called after every sample tick
+collector = SensorCollector(
+    config    = cfg,
+    drivers   = drivers,
+    buffer    = buf,
+    on_sample = trigger.check,   # ← the integration point
+)
+
+collector.start()
+# trigger.check() is now called automatically on every 5-second tick.
+# When the state machine detects a complete visit, handle_visit() fires.
+```
+
+#### Checking state
+
+```python
+print(trigger.state)   # "kitty_absent" or "kitty_present"
+```
+
+#### Resetting mid-visit
+
+```python
+trigger.reset()
+# Forces state back to KITTY_ABSENT without firing the callback.
+# Useful in the simulator and for recovery from sensor glitches.
+```
+
+---
+
+### 12.6 Complete wiring example
+
+```python
+from litterbox.time_buffer import RollingBuffer, load_td_config
+from litterbox.sensor_collector import (
+    SensorCollector, WeightDriver, AmmoniaDriver,
+    MethaneDriver, ChipIdDriver, SimilarityDriver,
+)
+from litterbox.visit_trigger import VisitTrigger
+
+# ── 1. Load configuration ──────────────────────────────────────────────
+cfg = load_td_config()   # reads src/litterbox/td_config.json
+
+# ── 2. Create the rolling buffer ───────────────────────────────────────
+buf = RollingBuffer(
+    window_minutes     = cfg["window_minutes"],
+    samples_per_minute = cfg["samples_per_minute"],
+)
+
+# ── 3. Define hardware drivers (swap for real hardware subclasses) ─────
+drivers = {
+    "weight":     WeightDriver(base_value=5400.0, noise_sigma=25.0),
+    "ammonia":    AmmoniaDriver(base_value=8.0,   noise_sigma=1.2),
+    "methane":    MethaneDriver(base_value=5.0,   noise_sigma=0.9),
+    "chip_id":    ChipIdDriver(cat_name=None),
+    "similarity": SimilarityDriver(cat_scores=None),
+}
+
+# ── 4. Define the visit-complete handler ───────────────────────────────
+def on_visit_complete(snapshot, entry_time, exit_time):
+    duration = (exit_time - entry_time).total_seconds()
+    print(f"Visit detected: {entry_time.isoformat()} → {exit_time.isoformat()}")
+    print(f"  Duration: {duration:.0f} s")
+    print(f"  Buffer samples in snapshot: {len(snapshot)}")
+    # Step 4 (VisitAnalyser) will process snapshot here.
+
+# ── 5. Create trigger and collector ────────────────────────────────────
+trigger = VisitTrigger(
+    config            = cfg,
+    buffer            = buf,
+    on_visit_complete = on_visit_complete,
+)
+
+collector = SensorCollector(
+    config    = cfg,
+    drivers   = drivers,
+    buffer    = buf,
+    on_sample = trigger.check,
+)
+
+# ── 6. Start sampling ──────────────────────────────────────────────────
+collector.start()
+print("Monitoring started.  Press Ctrl-C to stop.")
+
+try:
+    import time
+    while True:
+        time.sleep(10)
+        print(f"  Buffer: {len(buf)} samples  State: {trigger.state}")
+except KeyboardInterrupt:
+    pass
+finally:
+    collector.stop()
+    print("Monitoring stopped.")
+```
+
+---
+
+### 12.7 Plotting time-domain data
+
+The `td_plot` module provides a swappable plotting interface backed by Bokeh.
+
+```python
+from litterbox.td_plot import get_plot_backend
+from pathlib import Path
+
+backend = get_plot_backend("bokeh")   # only Bokeh is implemented so far
+
+# Plot scalar channels
+backend.plot_channels(
+    timestamps  = buf.get_timestamps(),
+    channels    = {
+        "weight_g":    buf.get_channel("weight_g"),
+        "ammonia_ppb": buf.get_channel("ammonia_ppb"),
+        "methane_ppb": buf.get_channel("methane_ppb"),
+    },
+    title       = "Live sensor feed",
+    output_path = Path("output/channels.html"),
+)
+
+# Plot similarity scores for all registered cats
+df_sim = buf.to_dataframe(channel_prefix="similarity_")
+backend.plot_similarity_dataframe(
+    df          = df_sim,
+    title       = "Cat similarity scores",
+    output_path = Path("output/similarity.html"),
+    threshold   = cfg["trigger"]["similarity_entry_threshold"],
+)
+```
+
+Both methods produce a **self-contained HTML file** (Bokeh JS inlined) that
+can be opened in any browser without an internet connection.
+
+Pass `output_path=None` to open the plot in the default browser instead of
+saving.
+
+**Swapping the backend:** create `td_plot_plotly.py` (or any other name) with
+a class `Backend` that inherits from `PlotBackend` and implements
+`plot_channels()` and `plot_similarity_dataframe()`.  Change the
+`get_plot_backend("bokeh")` call to `get_plot_backend("plotly")`.  No other
+file changes are required.
+
+---
+
+### 12.8 Step status
+
+| Step | Module | Status | Tests |
+|------|--------|--------|-------|
+| 1 | `time_buffer.py` — `RollingBuffer` + `load_td_config()` | **COMPLETE** | 42/42 |
+| 2 | `sensor_collector.py` — `SensorCollector` + driver interface | **COMPLETE** | 38/38 |
+| 3 | `visit_trigger.py` — `VisitTrigger` state machine | **COMPLETE** | 34/34 |
+| 4 | `visit_analyser.py` — cat ID from time-series, DB storage | Not started | — |
+
+---
+
+### 12.9 Troubleshooting the time-domain system
+
+**"Module not found: bokeh" or "Module not found: pandas"**
+
+```bash
+pip install "bokeh>=3.0.0" "pandas>=2.0.0"
+```
+
+Both are in `requirements.txt`; run `pip install -r requirements.txt` to
+install everything at once.
+
+**Trigger fires immediately on startup**
+
+The trigger computes the baseline weight from whatever is already in the buffer.
+If the buffer is empty when the first samples arrive, the baseline is computed
+from the first reading — which may be elevated if the box is not empty.
+Let the system run for at least one minute (12 samples) before the first visit
+so the buffer builds up a representative baseline.
+
+**Trigger never fires (weight path)**
+
+Check that:
+1. The weight driver is returning readings above zero.
+2. The baseline is stable (inspect via `buf.get_channel("weight_g")`).
+3. `weight_entry_delta_g` in `td_config.json` is not set higher than the
+   cat's weight.  For a 4 kg cat the default 300 g threshold is fine; an
+   entry delta of 5 000 g would never trigger.
+
+**Trigger never exits (similarity path)**
+
+The similarity exit requires **all** registered cats to have scores below
+`similarity_exit_threshold` for `chip_absent_consecutive` (default 3)
+consecutive ticks.  If even one cat's score stays above 0.50, the counter
+resets.  Check:
+- That the camera is not picking up a reflection or static object scoring
+  above the threshold.
+- That `similarity_exit_threshold` is above 0.0 (default 0.50 is correct
+  for most setups).
+
+**DataFrame `to_dataframe()` returns an empty DataFrame**
+
+The buffer is empty.  Start the collector, wait for at least one tick
+(5 seconds with the default config), and then call `to_dataframe()`.
+
+**Bokeh plot shows no data points (gaps only)**
+
+All values in the channel are `None`.  This means either the driver returned
+`None` every tick (sensor unavailable) or the channel was disabled in
+`td_config.json`.  Check `buf.get_channel("weight_g")` to confirm data
+is being written.

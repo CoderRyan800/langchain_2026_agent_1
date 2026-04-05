@@ -1,6 +1,6 @@
 # Testing
 
-This document describes the test suite for the litter box agent, how to run it, and the results from the baseline test run.
+This document describes both test suites in this repository and explains how to run them.
 
 ---
 
@@ -11,6 +11,7 @@ This document describes the test suite for the litter box agent, how to run it, 
 3. [Phase descriptions](#3-phase-descriptions)
 4. [Baseline test results](#4-baseline-test-results)
 5. [Known limitations and advisory notes](#5-known-limitations-and-advisory-notes)
+6. [Time-Domain Measurement System — pytest suite](#6-time-domain-measurement-system--pytest-suite)
 
 ---
 
@@ -240,3 +241,154 @@ Chroma's `PersistentClient` holds OS-level file handles. Within a single Python 
 ### Phase 5 writes to production
 
 Phase 5 tests the actual CLI entry point using subprocesses, which means it uses the production `data/` directory. The test records it creates are harmless but visible. If you want a completely clean production database, delete the 3 Unknown-ID visit records it creates after running the full test suite.
+
+---
+
+## 6. Time-Domain Measurement System — pytest suite
+
+The time-domain system (branch `feature/time_domain_measurements`) has its own
+fully automated pytest suite.  Unlike the manual integration tests above, these
+tests make **no LLM calls, no API calls, and no network requests**.  They run
+entirely offline and complete in about 12 seconds.
+
+### Test files
+
+| Test file | Step | What it tests | Tests |
+|-----------|------|---------------|-------|
+| `tests/test_time_buffer.py` | 1 | `RollingBuffer` + `load_td_config()` | 42 |
+| `tests/test_sensor_collector.py` | 2 | `BaseDriver`, all 5 driver classes, `SensorCollector` | 38 |
+| `tests/test_visit_trigger.py` | 3 | `VisitTrigger` state machine | 34 |
+| **Total** | | | **114** |
+
+### Running the time-domain tests
+
+```bash
+# All three steps together (recommended — catches cross-step regressions)
+pytest tests/test_time_buffer.py tests/test_sensor_collector.py tests/test_visit_trigger.py -v
+
+# One step at a time
+pytest tests/test_time_buffer.py -v        # Step 1
+pytest tests/test_sensor_collector.py -v  # Step 2
+pytest tests/test_visit_trigger.py -v     # Step 3
+
+# Fast smoke check (no -v)
+pytest tests/test_time_buffer.py tests/test_sensor_collector.py tests/test_visit_trigger.py
+```
+
+### Running the demo script
+
+A standalone demo script exercises the buffer, DataFrame conversion, and Bokeh
+plotter end-to-end with synthetic data:
+
+```bash
+python tests/step1_demo.py
+```
+
+Output files are written to `output/`:
+
+| File | Contents |
+|------|----------|
+| `output/step1_channels.html` | Linked-axis Bokeh plot — weight, ammonia, methane over a simulated 10-minute visit |
+| `output/step1_similarity.html` | Per-cat CLIP similarity scores — luna clearly dominant during the visit window |
+
+Open either file in any browser (no internet required — Bokeh JS is inlined).
+
+### Prerequisites
+
+The time-domain tests require `bokeh` and `pandas`, which are listed in
+`requirements.txt`:
+
+```bash
+pip install -r requirements.txt
+```
+
+Or install individually:
+
+```bash
+pip install "bokeh>=3.0.0" "pandas>=2.0.0"
+```
+
+### What each step's tests verify
+
+#### Step 1 — `test_time_buffer.py` (42 tests)
+
+| Test class | Focus |
+|------------|-------|
+| `TestCapacity` (6) | Buffer never exceeds `maxlen`; oldest entry evicted when full |
+| `TestGetChannel` (4) | Per-channel value retrieval; `None` for absent keys |
+| `TestGetTimestamps` (2) | Ordered timestamp list; empty buffer |
+| `TestWindowSpan` (4) | Elapsed seconds; single/empty buffer returns 0.0 |
+| `TestSnapshot` (4) | Copy-on-read semantics — mutating the returned list/dicts does not affect internal state |
+| `TestClear` (2) | Empties buffer; can append after clear |
+| `TestRepr` (1) | String representation contains key facts |
+| `TestToDataframe` (9) | Prefix stripping; NaN for absent keys; NaN-vs-zero correctness proof; timestamp index; time-range filter; JSON round-trip |
+| `TestLoadTdConfig` (8) | Loads real config; FileNotFoundError; missing required keys; wrong type |
+| `TestThreadSafety` (1) | Two threads × 500 appends → no corruption, correct final length |
+
+**Critical test: `test_nan_vs_zero_correctness`**
+
+This test proves why missing camera frames must be stored as absent keys (→ NaN
+in the DataFrame) rather than zeros.  With a 3-sample window where the middle
+sample has no camera frame:
+
+```
+t0: anna=0.91  luna=0.23
+t1: (no frame)
+t2: anna=0.89  luna=0.25
+```
+
+- NaN (correct): `anna.mean(skipna=True) = 0.900` → correctly identified
+- Zero-fill (wrong): `anna.mean() = (0.91 + 0 + 0.89) / 3 = 0.600` → wrong result (below threshold → Unknown)
+
+#### Step 2 — `test_sensor_collector.py` (38 tests)
+
+| Test class | Focus |
+|------------|-------|
+| `TestBaseDriver` (3) | Abstract interface — cannot instantiate, must implement `read()` |
+| `TestWeightDriver` (4) | Zero noise; Gaussian noise variance and range; defaults |
+| `TestAmmoniaDriver` (3) | Zero noise; zero-clamp with large negative noise; defaults |
+| `TestMethaneDriver` (3) | Same as ammonia |
+| `TestChipIdDriver` (3) | Cat name return; None return; defaults |
+| `TestSimilarityDriver` (4) | Dict return; None return; copy-on-read |
+| `TestSampleOnce` (9) | Buffer population; similarity expansion; disabled channel; missing driver; UTC timestamps; chip_id None semantics |
+| `TestRunMultipleTicks` (2) | Background thread produces ≥ 3 entries in 0.4 s; timestamps monotonic |
+| `TestStop` (4) | stop() within 2 s; idempotent; safe before start(); double-start raises |
+| `TestRepr` (3) | Interval in repr; running state in repr |
+
+#### Step 3 — `test_visit_trigger.py` (34 tests)
+
+| Test class | Focus |
+|------------|-------|
+| `TestStateConstants` (3) | String values of `KITTY_ABSENT` / `KITTY_PRESENT` |
+| `TestInitialState` (2) | Starts absent; no callback before first check() |
+| `TestWeightTrigger` (5) | Flat → rise → fall produces exactly one callback; correct entry/exit times; two visits |
+| `TestNoSpuriousTrigger` (2) | Oscillation below entry threshold never triggers |
+| `TestChipIdTrigger` (5) | Entry on non-null chip; N absent → exit; reset mid-sequence |
+| `TestSimilarityTrigger` (6) | Entry on high score; N below exit threshold → exit; counter reset; all-cats condition |
+| `TestMultipleCatsElevated` (3) | Two cats elevated → single entry/exit; exit requires all cats below |
+| `TestReset` (4) | reset() mid-visit; no callback; counters cleared; safe when already absent |
+| `TestMixedTriggers` (2) | Chip entry + weight exit; weight entry + chip exit |
+| `TestRepr` (2) | State visible in repr |
+
+### Cumulative test results (Steps 1–3)
+
+| Date | Branch | Platform | Python | Tests | Passed | Failed | Time |
+|------|--------|----------|--------|-------|--------|--------|------|
+| 2026-04-04 | `feature/time_domain_measurements` | macOS Darwin 25.4.0 | 3.12.12 | 114 | **114** | 0 | 11.34 s |
+
+### Bugs found during testing
+
+| # | Step | Location | Bug | Fix |
+|---|------|----------|-----|-----|
+| 1 | 1 | `td_plot_bokeh.py` | `figure(x_range=None)` rejected by Bokeh 3.x | Omit `x_range` kwarg for first panel |
+| 2 | 1 | `td_plot_bokeh.py` | `p.circle()` deprecated in Bokeh 3.4 | Replace with `p.scatter()` |
+| 3 | 1 | `test_time_buffer.py` | `pd.read_json(json_str)` treats string as file path in pandas 3.x | Wrap with `io.StringIO(json_str)` |
+| 4 | 3 | `visit_trigger.py` | `chip_id` key absent from values dict counted as "chip absent", triggering spurious exits | Added `_KEY_MISSING` sentinel to distinguish absent key from explicit `None` |
+
+### Individual step test reports
+
+Full per-test documentation is available in:
+
+- `docs/step1_test_report.md` — Step 1: RollingBuffer + Bokeh plotter
+- `docs/step2_test_report.md` — Step 2: SensorCollector + driver interface
+- `docs/step3_test_report.md` — Step 3: VisitTrigger state machine

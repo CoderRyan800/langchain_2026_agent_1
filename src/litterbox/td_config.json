@@ -48,5 +48,35 @@
   },
 
   "image_retention_days": 7,
-  "_comment2": "Camera images from visits are deleted after this many days."
+  "_comment2": "Camera images from visits are deleted after this many days.",
+
+  "eigen": {
+    "resample_length": 64,
+    "explained_variance_threshold": 0.95,
+    "pooled_minimum": 128,
+    "per_cat_minimum": 32,
+    "regularization_epsilon": 0.01,
+    "max_nan_fraction": 0.25,
+    "anomaly_thresholds": {
+      "normal": 0.90,
+      "mild": 0.70,
+      "significant": 0.40
+    },
+    "uniform_n": 4,
+    "uniform_n_coverage": 0.95,
+    "_comment": "Eigendecomposition analysis config. resample_length (L): all waveforms resampled to this length. per_cat_minimum (L/2): min waveforms for per-cat model (requires Tikhonov regularization). pooled_minimum (2*L): min waveforms for pooled model (full-rank). explained_variance_threshold: cumulative eigenvalue ratio to select N signal components. anomaly_thresholds: EV above 'normal' is normal, between 'mild' and 'normal' is mild, etc. uniform_n: when set (integer), forces all models to use this fixed N instead of per-model selection — produces fixed-length coefficient vectors for ML. uniform_n_coverage: fraction of waveforms that must achieve ev_threshold at the calibrated N (default 0.95)."
+  },
+
+  "cluster": {
+    "min_samples_for_clustering": 20,
+    "min_samples_per_cluster": 15,
+    "max_clusters": 5,
+    "n_init": 5,
+    "z_score_thresholds": {
+      "mild": -2.0,
+      "significant": -3.0,
+      "major": -4.0
+    },
+    "_comment": "GMM+BIC cluster analysis on expansion coefficients. min_samples_for_clustering: minimum scored waveforms before clustering activates. min_samples_per_cluster: minimum points per GMM component (guards against under-determined covariance). max_clusters: upper bound for k in BIC sweep. n_init: number of EM restarts per GMM fit. z_score_thresholds: log-likelihood z-score cutoffs for anomaly levels."
+  }
 }

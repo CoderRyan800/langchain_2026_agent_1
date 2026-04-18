@@ -24,7 +24,11 @@ setup(
     ],
     extras_require={
         "bob": ["tavily-python>=0.7.17"],
-        "dev": open("requirements-dev.txt").read().splitlines()
+        "dev": [
+            line
+            for line in open("requirements-dev.txt").read().splitlines()
+            if line.strip() and not line.strip().startswith(("-", "#"))
+        ]
         if __import__("pathlib").Path("requirements-dev.txt").exists()
         else [],
     },

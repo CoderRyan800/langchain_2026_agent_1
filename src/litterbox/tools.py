@@ -731,6 +731,53 @@ def list_cats() -> str:
     return "\n".join(lines)
 
 
+@tool
+def eigen_report(cat_name: str) -> str:
+    """Generate an eigenanalysis report for a cat's time-domain visit waveforms.
+
+    Produces an HTML file with:
+    - Overlay plot of all stored weight waveforms (zero-mean)
+    - Data table showing each visit's date, mean weight (DC term),
+      explained variance, residual, number of eigenvectors (N),
+      anomaly level, and expansion coefficients for the N principal components
+
+    The report is saved to output/eigen_<cat_name>.html.
+    """
+    from litterbox.eigen_query import generate_report, get_visit_summary
+
+    init_db()
+
+    summaries = get_visit_summary(cat_name)
+    if not summaries:
+        return f"No eigenanalysis data found for '{cat_name}'. Visits must be processed through the time-domain pipeline first."
+
+    output_dir = PROJECT_ROOT / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    safe_name = cat_name.lower().replace(" ", "_")
+    output_path = output_dir / f"eigen_{safe_name}.html"
+
+    generate_report(cat_name, output_path=output_path)
+
+    # Also return a text summary for the agent's response.
+    scored = [s for s in summaries if s["eigen_ev"] is not None]
+    lines = [
+        f"Eigenanalysis report for {cat_name}: {len(summaries)} visit(s), "
+        f"{len(scored)} scored.",
+        f"Report saved to: {output_path}",
+        "",
+    ]
+    for s in summaries:
+        ev_str = f"{s['eigen_ev']:.4f}" if s['eigen_ev'] is not None else "unscored"
+        dc_str = f"{s['dc_term']:.1f}" if s['dc_term'] is not None else "—"
+        n_str = str(s['n_components']) if s['n_components'] is not None else "—"
+        lines.append(
+            f"  Visit {s['visit_number']} ({s['entry_time'][:16]}): "
+            f"DC={dc_str}g  EV={ev_str}  N={n_str}  [{s['anomaly_level']}]"
+        )
+
+    return "\n".join(lines)
+
+
 ALL_TOOLS = [
     register_cat_image,
     record_entry,
@@ -743,4 +790,5 @@ ALL_TOOLS = [
     get_unconfirmed_visits,
     get_visit_images,
     list_cats,
+    eigen_report,
 ]

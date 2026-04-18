@@ -48,5 +48,20 @@
   },
 
   "image_retention_days": 7,
-  "_comment2": "Camera images from visits are deleted after this many days."
+  "_comment2": "Camera images from visits are deleted after this many days.",
+
+  "eigen": {
+    "resample_length": 64,
+    "explained_variance_threshold": 0.95,
+    "pooled_minimum": 128,
+    "per_cat_minimum": 32,
+    "regularization_epsilon": 0.01,
+    "max_nan_fraction": 0.25,
+    "anomaly_thresholds": {
+      "normal": 0.90,
+      "mild": 0.70,
+      "significant": 0.40
+    },
+    "_comment": "Eigendecomposition analysis config. resample_length (L): all waveforms resampled to this length. per_cat_minimum (L/2): min waveforms for per-cat model (requires Tikhonov regularization). pooled_minimum (2*L): min waveforms for pooled model (full-rank). explained_variance_threshold: cumulative eigenvalue ratio to select N signal components. anomaly_thresholds: EV above 'normal' is normal, between 'mild' and 'normal' is mild, etc."
+  }
 }

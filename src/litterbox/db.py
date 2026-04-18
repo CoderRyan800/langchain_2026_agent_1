@@ -107,9 +107,39 @@ def init_db() -> None:
                 model_id       INTEGER REFERENCES eigen_models(model_id),
                 raw_length     INTEGER NOT NULL,
                 nan_fraction   REAL NOT NULL,
+                cluster_log_likelihood REAL,
+                cluster_z_score        REAL,
+                cluster_assignment     INTEGER,
+                cluster_model_id       INTEGER REFERENCES cluster_models(cluster_model_id),
                 created_at     TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
+
+            CREATE TABLE IF NOT EXISTS cluster_models (
+                cluster_model_id  INTEGER PRIMARY KEY AUTOINCREMENT,
+                cat_id            INTEGER REFERENCES cats(cat_id),
+                channel           TEXT NOT NULL,
+                k_clusters        INTEGER NOT NULL,
+                means_json        TEXT NOT NULL,
+                covariances_json  TEXT NOT NULL,
+                weights_json      TEXT NOT NULL,
+                bic_values_json   TEXT NOT NULL,
+                n_samples         INTEGER NOT NULL,
+                uniform_n         INTEGER NOT NULL,
+                computed_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
         """)
+
+        # Idempotent migration: add cluster columns to eigen_waveforms if older DB
+        ew_cols = {row[1] for row in conn.execute("PRAGMA table_info(eigen_waveforms)")}
+        cluster_cols = [
+            ("cluster_log_likelihood", "REAL"),
+            ("cluster_z_score",        "REAL"),
+            ("cluster_assignment",     "INTEGER"),
+            ("cluster_model_id",       "INTEGER REFERENCES cluster_models(cluster_model_id)"),
+        ]
+        for col, typ in cluster_cols:
+            if col not in ew_cols:
+                conn.execute(f"ALTER TABLE eigen_waveforms ADD COLUMN {col} {typ}")
 
         # Idempotent migration: add sensor columns to visits if this is an older DB
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(visits)")}

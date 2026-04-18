@@ -62,6 +62,7 @@ from litterbox.time_buffer import load_td_config
 from litterbox.visit_analyser import VisitAnalyser
 from litterbox.analyser_pipeline import AnalyserPipeline
 from litterbox.eigen_analyser import EigenAnalyser
+from litterbox.cluster_analyser import ClusterAnalyser
 from litterbox.eigen_query import generate_report
 
 
@@ -327,25 +328,37 @@ def _write_summary(
     lines.append("## Swapped Visit Detection")
     lines.append("")
     swapped = [v for v in ground_truth if v.get("is_swapped")]
-    swapped_scored = [v for v in swapped if v.get("eigen_ev") is not None]
-    swapped_detected = [v for v in swapped_scored if v.get("anomaly_level") in ("mild", "significant", "major")]
+    swapped_ev_scored = [v for v in swapped if v.get("eigen_ev") is not None]
+    swapped_ev_detected = [v for v in swapped_ev_scored if v.get("anomaly_level") in ("mild", "significant", "major")]
+    swapped_cl_scored = [v for v in swapped if v.get("cluster_z_score") is not None]
+    swapped_cl_detected = [v for v in swapped_cl_scored if v.get("cluster_level") in ("mild", "significant", "major")]
 
     lines.append(f"- **Total swapped visits:** {len(swapped)}")
-    lines.append(f"- **Scored (had enough data for model):** {len(swapped_scored)}")
-    lines.append(f"- **Detected (EV flagged):** {len(swapped_detected)}")
-    if swapped_scored:
-        rate = len(swapped_detected) / len(swapped_scored) * 100
-        lines.append(f"- **Detection rate:** {rate:.0f}%")
+    lines.append(f"- **EV scored:** {len(swapped_ev_scored)}, detected: {len(swapped_ev_detected)}")
+    if swapped_ev_scored:
+        lines.append(f"- **EV detection rate:** {len(swapped_ev_detected) / len(swapped_ev_scored) * 100:.0f}%")
+    lines.append(f"- **Cluster scored:** {len(swapped_cl_scored)}, detected: {len(swapped_cl_detected)}")
+    if swapped_cl_scored:
+        lines.append(f"- **Cluster detection rate:** {len(swapped_cl_detected) / len(swapped_cl_scored) * 100:.0f}%")
+    # Combined: flagged by either layer.
+    swapped_either = [v for v in swapped if
+                      v.get("anomaly_level") in ("mild", "significant", "major") or
+                      v.get("cluster_level") in ("mild", "significant", "major")]
+    swapped_any_scored = [v for v in swapped if v.get("eigen_ev") is not None or v.get("cluster_z_score") is not None]
+    if swapped_any_scored:
+        lines.append(f"- **Combined (either layer):** {len(swapped_either)} / {len(swapped_any_scored)} = {len(swapped_either) / len(swapped_any_scored) * 100:.0f}%")
 
     lines.append("")
     lines.append("## Swapped Visit Details")
     lines.append("")
-    lines.append("| Visit | Cat (chip) | Source Shape | EV | Level |")
-    lines.append("|-------|-----------|-------------|-----|-------|")
+    lines.append("| Visit | Cat (chip) | Source Shape | EV | EV Level | Z-score | Cluster Level |")
+    lines.append("|-------|-----------|-------------|-----|----------|---------|---------------|")
     for v in swapped:
-        ev_str = f"{v['eigen_ev']:.4f}" if v.get("eigen_ev") is not None else "unscored"
-        level = v.get("anomaly_level", "unscored")
-        lines.append(f"| {v['visit_index']} | {v['cat_name']} | {v['source_baseline']} | {ev_str} | {level} |")
+        ev_str = f"{v['eigen_ev']:.4f}" if v.get("eigen_ev") is not None else "—"
+        ev_level = v.get("anomaly_level", "—")
+        z_str = f"{v['cluster_z_score']:.2f}" if v.get("cluster_z_score") is not None else "—"
+        cl_level = v.get("cluster_level", "—")
+        lines.append(f"| {v['visit_index']} | {v['cat_name']} | {v['source_baseline']} | {ev_str} | {ev_level} | {z_str} | {cl_level} |")
 
     # Normal visit stats.
     lines.append("")
@@ -394,7 +407,8 @@ def run_simulation(
     config = load_td_config()
     analyser = VisitAnalyser(config)
     eigen = EigenAnalyser(config)
-    pipeline = AnalyserPipeline([eigen], config)
+    cluster = ClusterAnalyser(config)
+    pipeline = AnalyserPipeline([eigen, cluster], config)
 
     # --- Build visit schedule ---
     cat_names = list(CATS.keys())
@@ -436,15 +450,23 @@ def run_simulation(
         )
 
         # Extract eigenanalysis result.
-        eigen_result = results[0] if results else None
+        eigen_result = results[0] if len(results) > 0 else None
+        cluster_result = results[1] if len(results) > 1 else None
+
         ev = eigen_result.details.get("ev") if eigen_result else None
         anomaly_level = eigen_result.anomaly_level if eigen_result else "unscored"
         n_comp = eigen_result.details.get("n_components") if eigen_result else None
 
+        cl_z = cluster_result.details.get("z_score") if cluster_result else None
+        cl_k = cluster_result.details.get("k_clusters") if cluster_result else None
+        cl_assign = cluster_result.details.get("cluster_assignment") if cluster_result else None
+        cl_level = cluster_result.anomaly_level if cluster_result else "unscored"
+
         # Progress indicator.
         swap_marker = " [SWAPPED]" if visit["is_swapped"] else ""
         ev_str = f"EV={ev:.4f}" if ev is not None else "accumulating"
-        status = f"  [{idx + 1:3d}/{len(schedule)}] {cat_name:8s} → {ev_str:20s} {anomaly_level:18s}{swap_marker}"
+        z_str = f"z={cl_z:.2f}" if cl_z is not None else ""
+        status = f"  [{idx + 1:3d}/{len(schedule)}] {cat_name:8s} → {ev_str:16s} {z_str:10s} {cl_level:18s}{swap_marker}"
         print(status)
 
         gt_entry = {
@@ -460,6 +482,10 @@ def run_simulation(
             "eigen_ev": round(ev, 6) if ev is not None else None,
             "anomaly_level": anomaly_level,
             "n_components": n_comp,
+            "cluster_z_score": round(cl_z, 4) if cl_z is not None else None,
+            "cluster_k": cl_k,
+            "cluster_assignment": cl_assign,
+            "cluster_level": cl_level,
         }
         ground_truth.append(gt_entry)
 

@@ -68,13 +68,18 @@ def get_visit_summary(
                  ew.eigen_residual,
                  ew.coefficients_json,
                  ew.nan_fraction,
+                 ew.cluster_log_likelihood,
+                 ew.cluster_z_score,
+                 ew.cluster_assignment,
                  em.n_components,
                  em.regularized,
-                 em.cat_id AS model_cat_id
+                 em.cat_id AS model_cat_id,
+                 cm.k_clusters
                FROM eigen_waveforms ew
                JOIN td_visits tv ON ew.td_visit_id = tv.td_visit_id
                JOIN cats c ON ew.cat_id = c.cat_id
                LEFT JOIN eigen_models em ON ew.model_id = em.model_id
+               LEFT JOIN cluster_models cm ON ew.cluster_model_id = cm.cluster_model_id
                WHERE c.name = ? AND ew.channel = ?
                ORDER BY tv.entry_time""",
             (cat_name, channel),
@@ -109,6 +114,10 @@ def get_visit_summary(
             "model_type": model_type,
             "anomaly_level": anomaly_level,
             "signal_coefficients": signal_coeffs,
+            "cluster_log_likelihood": row["cluster_log_likelihood"],
+            "cluster_z_score": row["cluster_z_score"],
+            "cluster_assignment": row["cluster_assignment"],
+            "k_clusters": row["k_clusters"],
         })
 
     return summaries
@@ -457,6 +466,21 @@ def _build_data_table(summaries: list[dict]) -> str:
 
         entry_short = s['entry_time'][:19] if s['entry_time'] else "—"
 
+        # Cluster fields.
+        k_cl = str(s.get('k_clusters')) if s.get('k_clusters') is not None else "—"
+        cl_assign = str(s.get('cluster_assignment')) if s.get('cluster_assignment') is not None else "—"
+        z_val = f"{s['cluster_z_score']:.2f}" if s.get('cluster_z_score') is not None else "—"
+        # Color z-score by severity.
+        z_class = "ev-normal"
+        if s.get('cluster_z_score') is not None:
+            z = s['cluster_z_score']
+            if z < -4.0:
+                z_class = "ev-major"
+            elif z < -3.0:
+                z_class = "ev-significant"
+            elif z < -2.0:
+                z_class = "ev-mild"
+
         rows_html.append(f"""<tr>
   <td>{s['visit_number']}</td>
   <td>{entry_short}</td>
@@ -465,6 +489,9 @@ def _build_data_table(summaries: list[dict]) -> str:
   <td>{residual_val}</td>
   <td>{n_val}</td>
   <td class="{ev_class}">{s['anomaly_level']}</td>
+  <td>{k_cl}</td>
+  <td>{cl_assign}</td>
+  <td class="{z_class}">{z_val}</td>
   <td class="coeffs">{coeffs_str}</td>
 </tr>""")
 
@@ -476,7 +503,10 @@ def _build_data_table(summaries: list[dict]) -> str:
   <th>Explained Var</th>
   <th>Residual</th>
   <th>N</th>
-  <th>Anomaly</th>
+  <th>EV Anomaly</th>
+  <th>k</th>
+  <th>Cluster</th>
+  <th>Z-score</th>
   <th>Signal Coefficients (c<sub>1</sub>…c<sub>N</sub>)</th>
 </tr></thead>
 <tbody>

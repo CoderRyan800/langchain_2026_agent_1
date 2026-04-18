@@ -18,6 +18,12 @@ This guide covers day-to-day use of both agents in this project.
 10. [Data and Storage](#10-data-and-storage)
 11. [Troubleshooting](#11-troubleshooting)
 12. [Time-Domain Measurement System](#12-time-domain-measurement-system)
+    - [12.10 Visit Analyser](#1210-step-4--visit-analyser-visit_analyserpy)
+    - [12.11 Analyser Pipeline](#1211-step-5a--analyser-pipeline-analyser_pipelinepy)
+    - [12.12 Eigenanalysis](#1212-step-5b--eigenanalysis-eigen_analyserpy)
+    - [12.13 Cluster Analysis](#1213-step-5c--cluster-analysis-cluster_analyserpy)
+    - [12.14 HTML Reports](#1214-html-reports-and-the-eigen_report-tool)
+    - [12.15 Simulation](#1215-simulation)
 
 ---
 
@@ -1640,7 +1646,11 @@ file changes are required.
 | 1 | `time_buffer.py` — `RollingBuffer` + `load_td_config()` | **COMPLETE** | 42/42 |
 | 2 | `sensor_collector.py` — `SensorCollector` + driver interface | **COMPLETE** | 38/38 |
 | 3 | `visit_trigger.py` — `VisitTrigger` state machine | **COMPLETE** | 34/34 |
-| 4 | `visit_analyser.py` — cat ID from time-series, DB storage | Not started | — |
+| 4 | `visit_analyser.py` — cat ID from time-series, DB storage | **COMPLETE** | 23/23 |
+| 5a | `analyser_pipeline.py` — plugin framework + resampling | **COMPLETE** | 20/20 |
+| 5b | `eigen_analyser.py` — eigendecomposition anomaly detection | **COMPLETE** | 35/35 |
+| 5c | `cluster_analyser.py` — GMM+BIC cluster analysis | **COMPLETE** | 15/15 |
+| — | `eigen_query.py` — query functions + HTML reports | **COMPLETE** | 15/15 |
 
 ---
 
@@ -1694,3 +1704,326 @@ All values in the channel are `None`.  This means either the driver returned
 `None` every tick (sensor unavailable) or the channel was disabled in
 `td_config.json`.  Check `buf.get_channel("weight_g")` to confirm data
 is being written.
+
+---
+
+### 12.10 Step 4 — Visit Analyser (`visit_analyser.py`)
+
+When the `VisitTrigger` fires `on_visit_complete`, the `VisitAnalyser`
+identifies which cat was in the box and persists the visit to the `td_visits`
+table.
+
+#### Cat identification priority
+
+1. **Chip ID** — if any sample in the visit window has a non-null `chip_id`,
+   the most frequent value wins.  The visit is marked `is_confirmed = True`.
+2. **Similarity DataFrame** — the analyser builds a per-cat DataFrame from
+   `similarity_*` channels, computes column means (`skipna=True`), and checks
+   that the winning cat exceeds `similarity_entry_threshold` for at least
+   `similarity_sustained_peak_samples` (P) consecutive non-NaN samples.
+   Missing frames (NaN) are skipped — they neither count toward nor reset
+   the consecutive run.  The visit is marked as a tentative (unconfirmed) ID.
+3. **Unknown** — if neither method produces a result, `id_method = "unknown"`.
+
+#### Image retention
+
+The `sweep_old_visit_images()` utility in `image_retention.py` deletes visit
+image directories older than `image_retention_days` (default 7).  It takes the
+image base path as an explicit parameter so tests can run without monkeypatching.
+
+---
+
+### 12.11 Step 5a — Analyser Pipeline (`analyser_pipeline.py`)
+
+The `AnalyserPipeline` is the plugin framework that runs one or more
+time-domain analysers on each completed visit.
+
+```
+VisitAnalyser.save()  →  AnalyserPipeline.run()
+                              │
+                      ┌───────┼──────────┐
+                      ▼       ▼          ▼
+                  EigenPlugin  ClusterPlugin  (future plugins)
+```
+
+#### Key components
+
+- **`BaseAnalyser`** — abstract base class.  Plugins implement `name` and
+  `analyse(waveform, visit_record, channel) → AnalysisResult`.
+- **`AnalysisResult`** — dataclass with `plugin_name`, `anomaly_score` (0–1),
+  `anomaly_level` (normal/mild/significant/major), and a `details` dict.
+- **`resample_to_length(raw, target_length=64)`** — NaN-gap-filling + linear
+  interpolation utility.  The pipeline resamples every visit's weight channel
+  to L=64 samples before passing to plugins.
+- **Fault isolation** — if a plugin raises an exception, the pipeline logs it,
+  records an error result, and continues to the next plugin.
+
+#### Plugin contract
+
+Each plugin receives a **resampled** waveform of length L (default 64).  The
+waveform is **not** mean-subtracted — each plugin owns its own preprocessing.
+This allows different plugins to use different normalisation strategies.
+
+---
+
+### 12.12 Step 5b — Eigenanalysis (`eigen_analyser.py`)
+
+This plugin decomposes each visit's weight waveform into an eigenvector basis
+derived from historical visits.  It implements **Layer 1** (out-of-subspace)
+anomaly detection.
+
+#### How it works
+
+Each visit's weight waveform is a curve with a characteristic shape:
+
+```
+[baseline] → [ramp up] → [plateau] → [ramp down] → [baseline + waste]
+```
+
+The key insight: this shape isn't random.  If you collect hundreds of
+waveforms for a cat and compute the autocovariance matrix, a small number of
+eigenvectors (N) will explain nearly all the variance.  A typical visit's
+waveform is a linear combination of these N eigenvectors — the rest is noise.
+
+#### Pipeline per visit
+
+1. **Mean-subtract** the resampled L=64 waveform.  The DC term (mean weight)
+   is stored separately — it's useful metadata but would dominate the
+   covariance matrix if left in.
+
+2. **Store** the zero-mean waveform and DC term in `eigen_waveforms`.
+
+3. **Select model** — per-cat if the cat has ≥ L/2 (32) stored waveforms,
+   pooled (all cats combined) if there are ≥ 2L (128) total, or skip if
+   neither threshold is met.
+
+4. **Compute the autocovariance matrix** C = XᵀX / (K-1) from all relevant
+   stored waveforms.  Apply Tikhonov regularization (C + αI) when K < L to
+   handle rank deficiency.
+
+5. **Eigendecompose** via `numpy.linalg.eigh` (exploits symmetry, returns
+   real eigenvalues).  Sort by descending eigenvalue.
+
+6. **Select N** — the smallest number of eigenvectors whose cumulative
+   variance exceeds 95%.  When `uniform_n` is set in config (default: 4),
+   all models use that fixed N instead, producing fixed-length coefficient
+   vectors suitable for ML.
+
+7. **Project and score** — compute expansion coefficients c = Vᵀx (full
+   L-vector) and reconstruction x̂ = V_N c[:N].  Explained variance:
+   `EV = 1 - ‖x - x̂‖² / ‖x‖²`.
+
+8. **Classify** by EV threshold:
+
+   | EV range | Level | Meaning |
+   |----------|-------|---------|
+   | ≥ 0.90 | normal | Waveform well-explained by historical patterns |
+   | 0.70 – 0.90 | mild | Unusual shape — review recommended |
+   | 0.40 – 0.70 | significant | Major shape anomaly — alert owner |
+   | < 0.40 | major | Extreme anomaly — likely sensor failure or acute issue |
+
+#### What to look for in eigenanalysis results
+
+- **EV consistently > 0.95:** Normal.  The cat's visit patterns are stable.
+- **EV drops to 0.85–0.90:** Mild.  Could be a posture change, a different
+  entry/exit pattern, or the cat fidgeting more than usual.  Worth noting
+  but not alarming.
+- **EV drops below 0.70:** Something is genuinely different.  Either the
+  sensor is malfunctioning (check the waveform plot — does it look like
+  noise?) or the cat's behavior has changed meaningfully (straining,
+  repeated repositioning, prolonged visit).
+- **EV below 0.40:** Almost certainly a sensor failure (check raw data) or
+  an extreme behavioral anomaly.  Escalate immediately.
+- **DC term trending:** The DC term (mean weight) is tracked separately.
+  A gradual increase over weeks could indicate weight gain; a sudden change
+  might indicate fluid retention.  This is independent of the shape analysis.
+
+#### Uniform N and expansion coefficients
+
+When `uniform_n` is set (calibrated to 4 for this system), every visit
+produces a fixed-length coefficient vector [c₁, c₂, c₃, c₄].  These
+represent the "fingerprint" of the visit's waveform shape in the eigenbasis.
+
+The `calibrate_uniform_n()` method finds the smallest N where ≥ 95% of stored
+waveforms achieve ≥ 95% explained variance.  Run it once after accumulating
+enough data (≥ 128 visits):
+
+```python
+from litterbox.eigen_analyser import EigenAnalyser
+from litterbox.time_buffer import load_td_config
+
+config = load_td_config()
+eigen = EigenAnalyser(config)
+result = eigen.calibrate_uniform_n("weight_g")
+print(f"N = {result['uniform_n']}, coverage = {result['actual_coverage']:.1%}")
+# Then set "uniform_n": 4 in td_config.json
+```
+
+---
+
+### 12.13 Step 5c — Cluster Analysis (`cluster_analyser.py`)
+
+This plugin implements **Layer 2** (in-subspace) anomaly detection via
+Gaussian Mixture Model (GMM) clustering on the N-dimensional expansion
+coefficients.
+
+#### Why two layers?
+
+Layer 1 (EV) catches visits whose waveform shape can't be represented at all
+by the learned eigenvectors — the signal has energy in unknown directions.
+
+But a waveform can score high EV and still be anomalous.  If a cat normally
+produces coefficient vectors near [14, -3, 1, 0.5] and a visit produces
+[14, -12, 8, -5], the EV may be 0.97 (the energy is in the right directions)
+but the *combination* is unlike anything the cat has done before.  Layer 2
+catches this.
+
+#### How it works
+
+1. **Collect** all N-dimensional coefficient vectors for a cat.
+2. **Fit GMMs** for k = 1, 2, ..., k_max components with full covariance.
+3. **Select k\*** via BIC (Bayesian Information Criterion) — the model that
+   best balances fit and complexity.  BIC naturally prefers k=1 for unimodal
+   data and only adds clusters when the data justifies it.
+4. **Score** the new visit by computing its log-likelihood under the fitted
+   GMM.
+5. **Z-score** the log-likelihood against the distribution of training
+   log-likelihoods: `z = (ll - mean_ll) / std_ll`.
+
+#### What to look for in cluster results
+
+- **z-score near 0:** Normal — the visit's coefficients are in a
+  typical region of the cat's coefficient space.
+- **z-score < -2 (mild):** The coefficient vector is in a low-probability
+  region.  The visit's waveform shape, while representable by the eigenbasis,
+  is an unusual combination for this cat.
+- **z-score < -3 (significant):** Statistically very unlikely under the
+  learned distribution.  Warrants investigation.
+- **z-score < -4 (major):** Essentially zero probability under the model.
+  Either a sensor issue or a genuinely unprecedented behavioral pattern.
+- **k_clusters > 1:** The cat has multiple distinct behavioral modes (e.g.,
+  different postures for urination vs. defecation, or morning vs. evening
+  patterns).  This is not inherently concerning — it means the GMM has
+  learned that the cat has multiple "normal" patterns.
+
+#### Combined Layer 1 + Layer 2 assessment
+
+| Layer 1 (EV) | Layer 2 (z-score) | Interpretation |
+|---|---|---|
+| normal | normal | Fully normal visit |
+| normal | flagged | In-subspace anomaly — unusual coefficient combination |
+| flagged | normal | Out-of-subspace anomaly — unfamiliar waveform direction |
+| flagged | flagged | Serious anomaly — both shape and combination are unusual |
+
+In simulation testing (400 visits, 5% swap injection), Layer 1 alone detected
+0% of swapped visits (EVs all > 0.90).  Layer 2 alone detected **100%** of
+scored swapped visits (z-scores from -3.67 to -104.90) with zero false
+positives.
+
+---
+
+### 12.14 HTML Reports and the `eigen_report` Tool
+
+#### Generating reports
+
+Ask the agent to generate a report:
+
+```
+Show me Luna's eigenanalysis report.
+```
+
+The agent calls the `eigen_report` tool, which produces an HTML file at
+`output/eigen_luna.html` and returns a text summary.
+
+You can also generate reports programmatically:
+
+```python
+from litterbox.eigen_query import generate_report
+
+generate_report("Luna", output_path="output/eigen_luna.html")
+```
+
+#### Reading the report
+
+Each HTML report contains:
+
+1. **Waveform overlay plot** — all stored zero-mean waveforms for the cat
+   plotted on the same axes, color-coded by visit.  Look for:
+   - Consistent shapes: the waveforms should cluster visually.
+   - Outlier shapes: a waveform that looks very different from the rest.
+   - Shape evolution: gradual changes over time could indicate behavioral
+     shifts.
+
+2. **Data table** — one row per visit with:
+
+   | Column | What to look for |
+   |--------|-----------------|
+   | DC (mean g) | Absolute weight trend — gradual increase may indicate weight gain |
+   | Explained Var | Should be > 0.90 for normal visits; drops indicate shape anomaly |
+   | Residual | Reconstruction error — high values correlate with low EV |
+   | N | Number of eigenvectors used (fixed at 4 with uniform_n) |
+   | EV Anomaly | Layer 1 classification: normal/mild/significant/major |
+   | k | Number of GMM clusters found for this cat |
+   | Cluster | Which cluster this visit was assigned to (0, 1, 2...) |
+   | Z-score | Layer 2 score — negative values below -2 indicate anomaly |
+   | Signal Coefficients | The N expansion coefficients [c₁, ..., c_N] |
+
+#### Query functions
+
+```python
+from litterbox.eigen_query import get_visit_summary, get_waveforms, get_model
+
+# Per-visit summary with all fields
+summaries = get_visit_summary("Luna")
+for s in summaries:
+    print(f"Visit {s['visit_number']}: EV={s['eigen_ev']:.4f}  "
+          f"z={s['cluster_z_score']:.2f}  k={s['k_clusters']}")
+
+# Raw waveform arrays for custom analysis
+waveforms, timestamps = get_waveforms("Luna")
+# waveforms: list of L=64 numpy arrays (zero-mean)
+
+# Current eigenmodel
+model = get_model("Luna")
+# model["eigenvalues"], model["eigenvectors"], model["n_components"]
+```
+
+---
+
+### 12.15 Simulation
+
+The eigenanalysis simulator generates synthetic visits and runs them through
+the full pipeline to verify the system end-to-end.
+
+```bash
+python simulator/eigen_sim.py                       # 400 visits, seed=42
+python simulator/eigen_sim.py --seed 123            # different seed
+python simulator/eigen_sim.py --visits 50           # fewer visits (faster)
+python simulator/eigen_sim.py --report-only         # regenerate reports only
+python simulator/eigen_sim.py --clean               # wipe eigen tables first
+```
+
+Each cat has a distinct parametric waveform shape:
+
+| Cat | Shape character |
+|-----|----------------|
+| Anna | Steep ramp, high-frequency ripple on plateau |
+| Luna | Gradual ramp, deep sag in the middle |
+| Marina | Medium ramp, two sharp bumps (repositioning) |
+| Natasha | Steep ramp, smooth parabolic rise |
+
+5% of visits swap in a different cat's waveform shape to test anomaly
+detection.  The chip ID still identifies the correct cat — only the shape
+is wrong.
+
+**Outputs:**
+
+- `simulator/eigen_sim_reports/eigen_*.html` — per-cat HTML reports
+- `simulator/eigen_sim_ground_truth.json` — per-visit ground truth
+- `simulator/eigen_sim_summary.md` — detection statistics
+
+**Baseline results (seed=42, 400 visits):**
+
+- Normal visits: mean EV = 0.995, zero false positives
+- Swapped visits: Layer 1 (EV) detection = 0%, Layer 2 (cluster) detection = 100%
+- Calibrated uniform N = 4 (96.5% coverage at 95% EV)

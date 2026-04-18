@@ -83,6 +83,19 @@ class EigenAnalyser(BaseAnalyser):
             thresholds.get("significant", 0.40)
         )
 
+        # Uniform N: when set, all models use this fixed N instead of
+        # selecting N per-model from cumulative variance.  This produces
+        # fixed-length coefficient vectors suitable for ML.
+        uniform_n = eigen_cfg.get("uniform_n")
+        self._uniform_n: Optional[int] = int(uniform_n) if uniform_n is not None else None
+
+        # Coverage target for calibrate_uniform_n(): the fraction of
+        # stored waveforms that must achieve >= ev_threshold at the
+        # chosen N.  Default 0.95 = 95% of waveforms.
+        self._uniform_n_coverage: float = float(
+            eigen_cfg.get("uniform_n_coverage", 0.95)
+        )
+
     @property
     def name(self) -> str:
         return "eigen"
@@ -201,14 +214,17 @@ class EigenAnalyser(BaseAnalyser):
         eigenvalues = np.maximum(eigenvalues, 0.0)
 
         # --- Select N components ---
-        total_variance = eigenvalues.sum()
-        if total_variance == 0:
-            n_components = self._L
-            cum_ratio = np.ones(self._L)
+        if self._uniform_n is not None:
+            # Fixed N across all cats — for ML on coefficient vectors.
+            n_components = min(self._uniform_n, self._L)
         else:
-            cum_ratio = np.cumsum(eigenvalues) / total_variance
-            n_components = int(np.searchsorted(cum_ratio, self._ev_threshold) + 1)
-            n_components = min(n_components, self._L)
+            total_variance = eigenvalues.sum()
+            if total_variance == 0:
+                n_components = self._L
+            else:
+                cum_ratio = np.cumsum(eigenvalues) / total_variance
+                n_components = int(np.searchsorted(cum_ratio, self._ev_threshold) + 1)
+                n_components = min(n_components, self._L)
 
         # --- Save model ---
         model_cat_id = cat_id if model_type == "per_cat" else None
@@ -281,6 +297,130 @@ class EigenAnalyser(BaseAnalyser):
         else:
             # Below significant threshold → major.
             return "major", 1.0
+
+    # ------------------------------------------------------------------
+    # Uniform N calibration
+    # ------------------------------------------------------------------
+
+    def calibrate_uniform_n(
+        self,
+        channel: str = "weight_g",
+        ev_target: Optional[float] = None,
+        coverage: Optional[float] = None,
+    ) -> dict:
+        """Find the smallest N where ≥ *coverage* of stored waveforms
+        achieve ≥ *ev_target* explained variance.
+
+        This uses the **pooled** eigenbasis (all cats combined) so the
+        resulting N is consistent across cats.
+
+        Parameters
+        ----------
+        channel:
+            Sensor channel to calibrate on.
+        ev_target:
+            Minimum explained variance per waveform (default: config
+            ``explained_variance_threshold``, typically 0.95).
+        coverage:
+            Fraction of waveforms that must meet *ev_target*
+            (default: config ``uniform_n_coverage``, typically 0.95).
+
+        Returns
+        -------
+        dict
+            ``{"uniform_n": int, "ev_target": float, "coverage": float,
+               "actual_coverage": float, "k_waveforms": int,
+               "ev_at_n": list[float]}``
+            where ``ev_at_n[i]`` is the EV of waveform *i* at the chosen N.
+
+        Side Effects
+        ------------
+        Sets ``self._uniform_n`` so subsequent ``analyse()`` calls use the
+        calibrated N.
+        """
+        init_db()
+
+        if ev_target is None:
+            ev_target = self._ev_threshold
+        if coverage is None:
+            coverage = self._uniform_n_coverage
+
+        # Load all stored waveform vectors.
+        vectors = self._load_vectors(channel, cat_id=None)
+        K = len(vectors)
+        if K < 2:
+            return {
+                "uniform_n": self._L,
+                "ev_target": ev_target,
+                "coverage": coverage,
+                "actual_coverage": 0.0,
+                "k_waveforms": K,
+                "ev_at_n": [],
+            }
+
+        X = np.array(vectors)  # (K, L)
+        C = X.T @ X / (K - 1)  # (L, L)
+
+        # Regularize if K < L.
+        if K < self._L:
+            alpha = self._reg_eps * np.trace(C) / self._L
+            C += alpha * np.eye(self._L)
+
+        eigenvalues, eigenvectors = np.linalg.eigh(C)
+        idx = np.argsort(eigenvalues)[::-1]
+        eigenvalues = np.maximum(eigenvalues[idx], 0.0)
+        eigenvectors = eigenvectors[:, idx]
+
+        # For each candidate N, compute EV for every waveform.
+        # EV_i(N) = 1 - ||x_i - V_N V_N^T x_i||^2 / ||x_i||^2
+        # Precompute all projections efficiently.
+        norms_sq = np.sum(X ** 2, axis=1)  # (K,)
+        # Coefficients in eigenbasis: C_full = X @ V  → (K, L)
+        coeffs_full = X @ eigenvectors  # (K, L)
+
+        best_n = self._L
+        best_actual_coverage = 0.0
+
+        for n in range(1, self._L + 1):
+            # Reconstruction energy using first n components.
+            recon_energy = np.sum(coeffs_full[:, :n] ** 2, axis=1)  # (K,)
+            # EV per waveform.
+            ev_per_wf = np.where(
+                norms_sq > 0,
+                recon_energy / norms_sq,
+                1.0,
+            )
+            frac_meeting = float(np.mean(ev_per_wf >= ev_target))
+
+            if frac_meeting >= coverage:
+                best_n = n
+                best_actual_coverage = frac_meeting
+                break
+        else:
+            # Even N=L didn't meet coverage (shouldn't happen for real data).
+            best_actual_coverage = float(np.mean(
+                np.sum(coeffs_full ** 2, axis=1) / np.maximum(norms_sq, 1e-30) >= ev_target
+            ))
+
+        # Compute per-waveform EV at the chosen N for reporting.
+        recon_energy = np.sum(coeffs_full[:, :best_n] ** 2, axis=1)
+        ev_at_n = np.where(norms_sq > 0, recon_energy / norms_sq, 1.0).tolist()
+
+        self._uniform_n = best_n
+
+        logger.info(
+            "Calibrated uniform_n=%d: %.1f%% of %d waveforms achieve EV >= %.3f",
+            best_n, best_actual_coverage * 100, K, ev_target,
+        )
+
+        return {
+            "uniform_n": best_n,
+            "ev_target": ev_target,
+            "coverage": coverage,
+            "actual_coverage": best_actual_coverage,
+            "k_waveforms": K,
+            "ev_at_n": ev_at_n,
+        }
 
     # ------------------------------------------------------------------
     # DB operations

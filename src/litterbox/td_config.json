@@ -62,6 +62,7 @@
       "mild": 0.70,
       "significant": 0.40
     },
-    "_comment": "Eigendecomposition analysis config. resample_length (L): all waveforms resampled to this length. per_cat_minimum (L/2): min waveforms for per-cat model (requires Tikhonov regularization). pooled_minimum (2*L): min waveforms for pooled model (full-rank). explained_variance_threshold: cumulative eigenvalue ratio to select N signal components. anomaly_thresholds: EV above 'normal' is normal, between 'mild' and 'normal' is mild, etc."
+    "uniform_n_coverage": 0.95,
+    "_comment": "Eigendecomposition analysis config. resample_length (L): all waveforms resampled to this length. per_cat_minimum (L/2): min waveforms for per-cat model (requires Tikhonov regularization). pooled_minimum (2*L): min waveforms for pooled model (full-rank). explained_variance_threshold: cumulative eigenvalue ratio to select N signal components. anomaly_thresholds: EV above 'normal' is normal, between 'mild' and 'normal' is mild, etc. uniform_n: when set (integer), forces all models to use this fixed N instead of per-model selection — produces fixed-length coefficient vectors for ML. uniform_n_coverage: fraction of waveforms that must achieve ev_threshold at the calibrated N (default 0.95)."
   }
 }

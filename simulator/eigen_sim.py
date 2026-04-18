@@ -281,7 +281,10 @@ def _ensure_cats_registered() -> None:
 # Summary report
 # ===========================================================================
 
-def _write_summary(ground_truth: list[dict]) -> None:
+def _write_summary(
+    ground_truth: list[dict],
+    calibration_info: Optional[dict] = None,
+) -> None:
     """Write a Markdown summary report."""
     lines = [
         "# Eigenanalysis Simulation Summary",
@@ -290,6 +293,18 @@ def _write_summary(ground_truth: list[dict]) -> None:
         f"**Total visits:** {len(ground_truth)}",
         "",
     ]
+
+    if calibration_info:
+        lines.extend([
+            "## Uniform N Calibration",
+            "",
+            f"- **Calibrated N:** {calibration_info['uniform_n']}",
+            f"- **EV target:** {calibration_info['ev_target']:.2f}",
+            f"- **Coverage target:** {calibration_info['coverage_target']:.0%}",
+            f"- **Actual coverage:** {calibration_info['actual_coverage']:.1%}",
+            f"- **Waveforms used:** {calibration_info['k_waveforms_calibrated']}",
+            "",
+        ])
 
     # Per-cat stats.
     cat_names = sorted(CATS.keys())
@@ -448,20 +463,44 @@ def run_simulation(
         }
         ground_truth.append(gt_entry)
 
+    # --- Calibrate uniform N ---
+    print("\nCalibrating uniform N...")
+    cal = eigen.calibrate_uniform_n("weight_g")
+    print(f"  uniform_n = {cal['uniform_n']}  "
+          f"(coverage: {cal['actual_coverage']:.1%} of {cal['k_waveforms']} waveforms "
+          f"achieve EV >= {cal['ev_target']:.2f})")
+
+    # Attach calibration info to ground truth.
+    calibration_info = {
+        "uniform_n": cal["uniform_n"],
+        "ev_target": cal["ev_target"],
+        "coverage_target": cal["coverage"],
+        "actual_coverage": cal["actual_coverage"],
+        "k_waveforms_calibrated": cal["k_waveforms"],
+    }
+
     # --- Write ground truth ---
+    output = {
+        "calibration": calibration_info,
+        "visits": ground_truth,
+    }
     GROUND_TRUTH_PATH.parent.mkdir(parents=True, exist_ok=True)
     GROUND_TRUTH_PATH.write_text(
-        json.dumps(ground_truth, indent=2), encoding="utf-8"
+        json.dumps(output, indent=2), encoding="utf-8"
     )
-    print(f"\nGround truth written to: {GROUND_TRUTH_PATH}")
+    print(f"Ground truth written to: {GROUND_TRUTH_PATH}")
 
     # --- Generate reports ---
-    _generate_all_reports(cat_names, ground_truth)
+    _generate_all_reports(cat_names, ground_truth, calibration_info)
 
     return ground_truth
 
 
-def _generate_all_reports(cat_names: list[str], ground_truth: list[dict]) -> None:
+def _generate_all_reports(
+    cat_names: list[str],
+    ground_truth: list[dict],
+    calibration_info: Optional[dict] = None,
+) -> None:
     """Generate per-cat HTML reports and the summary."""
     SIM_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -471,7 +510,7 @@ def _generate_all_reports(cat_names: list[str], ground_truth: list[dict]) -> Non
         generate_report(cat_name, output_path=output_path)
         print(f"  {cat_name}: {output_path}")
 
-    _write_summary(ground_truth)
+    _write_summary(ground_truth, calibration_info)
 
 
 def regenerate_reports() -> None:
@@ -480,9 +519,16 @@ def regenerate_reports() -> None:
         print(f"No ground truth found at {GROUND_TRUTH_PATH}. Run the simulation first.")
         return
 
-    gt = json.loads(GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
+    raw = json.loads(GROUND_TRUTH_PATH.read_text(encoding="utf-8"))
+    # Handle both old format (list) and new format (dict with calibration).
+    if isinstance(raw, dict):
+        gt = raw["visits"]
+        cal = raw.get("calibration")
+    else:
+        gt = raw
+        cal = None
     cat_names = sorted(CATS.keys())
-    _generate_all_reports(cat_names, gt)
+    _generate_all_reports(cat_names, gt, cal)
 
 
 # ===========================================================================

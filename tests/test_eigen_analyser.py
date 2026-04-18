@@ -775,3 +775,127 @@ class TestRoundTrip:
 
         coefficients = result.details["coefficients"]
         assert len(coefficients) == 64
+
+
+# ---------------------------------------------------------------------------
+# TestUniformN
+# ---------------------------------------------------------------------------
+
+
+class TestUniformN:
+    """Uniform N: fixed subspace dimension across all cats for ML."""
+
+    def test_config_uniform_n_overrides_selection(self):
+        """When uniform_n is set in config, n_components is fixed."""
+        cat_id = _insert_cat("UniformCat")
+
+        config = _make_config(per_cat_minimum=5, uniform_n=5)
+        analyser = EigenAnalyser(config)
+
+        vecs = _make_subspace_waveforms(20, L=64, n_basis=3, seed=42)
+        _insert_waveforms("weight_g", cat_id, vecs)
+
+        td_visit_id = _insert_td_visit()
+        record = _make_record(cat_id=cat_id, td_visit_id=td_visit_id)
+        result = analyser.analyse(vecs[0].copy(), record, "weight_g")
+
+        assert result.details["n_components"] == 5
+
+    def test_uniform_n_consistent_across_cats(self):
+        """Two different cats with uniform_n get the same N."""
+        cat_a = _insert_cat("UniformA")
+        cat_b = _insert_cat("UniformB")
+
+        config = _make_config(per_cat_minimum=5, uniform_n=4)
+        analyser = EigenAnalyser(config)
+
+        vecs_a = _make_subspace_waveforms(10, L=64, n_basis=3, seed=1)
+        vecs_b = _make_subspace_waveforms(10, L=64, n_basis=5, seed=2)
+        _insert_waveforms("weight_g", cat_a, vecs_a)
+        _insert_waveforms("weight_g", cat_b, vecs_b)
+
+        td_id_a = _insert_td_visit()
+        result_a = analyser.analyse(
+            vecs_a[0].copy(), _make_record(cat_id=cat_a, td_visit_id=td_id_a), "weight_g"
+        )
+        td_id_b = _insert_td_visit()
+        result_b = analyser.analyse(
+            vecs_b[0].copy(), _make_record(cat_id=cat_b, td_visit_id=td_id_b), "weight_g"
+        )
+
+        assert result_a.details["n_components"] == 4
+        assert result_b.details["n_components"] == 4
+
+    def test_signal_coefficients_length_matches_uniform_n(self):
+        """Stored signal coefficients in report have length uniform_n."""
+        from litterbox.eigen_query import get_visit_summary
+
+        cat_id = _insert_cat("UniformSigCat")
+
+        config = _make_config(per_cat_minimum=5, uniform_n=6)
+        analyser = EigenAnalyser(config)
+
+        vecs = _make_subspace_waveforms(15, L=64, n_basis=3, seed=42)
+        _insert_waveforms("weight_g", cat_id, vecs)
+
+        td_visit_id = _insert_td_visit()
+        record = _make_record(cat_id=cat_id, td_visit_id=td_visit_id)
+        analyser.analyse(vecs[0].copy(), record, "weight_g")
+
+        summaries = get_visit_summary("UniformSigCat")
+        scored = [s for s in summaries if s["signal_coefficients"] is not None]
+        assert len(scored) >= 1
+        assert len(scored[0]["signal_coefficients"]) == 6
+
+    def test_calibrate_finds_correct_n(self):
+        """calibrate_uniform_n finds the smallest N meeting coverage target."""
+        cat_a = _insert_cat("CalibA")
+        cat_b = _insert_cat("CalibB")
+
+        config = _make_config(per_cat_minimum=5)
+        analyser = EigenAnalyser(config)
+
+        # Two groups of waveforms with 3 basis vectors each.
+        vecs_a = _make_subspace_waveforms(30, L=64, n_basis=3, noise_sigma=0.01, seed=10)
+        vecs_b = _make_subspace_waveforms(30, L=64, n_basis=3, noise_sigma=0.01, seed=20)
+        _insert_waveforms("weight_g", cat_a, vecs_a)
+        _insert_waveforms("weight_g", cat_b, vecs_b)
+
+        result = analyser.calibrate_uniform_n("weight_g")
+
+        # With 3-basis waveforms and low noise, N should be small (3-6).
+        assert result["uniform_n"] <= 10
+        assert result["actual_coverage"] >= 0.95
+        assert result["k_waveforms"] == 60
+        # After calibration, _uniform_n should be set.
+        assert analyser._uniform_n == result["uniform_n"]
+
+    def test_calibrate_then_analyse_uses_calibrated_n(self):
+        """After calibrate_uniform_n, analyse uses the calibrated N."""
+        cat_id = _insert_cat("CalibThenAnalyse")
+
+        config = _make_config(per_cat_minimum=5)
+        analyser = EigenAnalyser(config)
+
+        vecs = _make_subspace_waveforms(40, L=64, n_basis=3, noise_sigma=0.01, seed=42)
+        _insert_waveforms("weight_g", cat_id, vecs)
+
+        cal = analyser.calibrate_uniform_n("weight_g")
+        calibrated_n = cal["uniform_n"]
+
+        # Now analyse a new visit — should use calibrated N.
+        td_visit_id = _insert_td_visit()
+        record = _make_record(cat_id=cat_id, td_visit_id=td_visit_id)
+        result = analyser.analyse(vecs[0].copy(), record, "weight_g")
+
+        assert result.details["n_components"] == calibrated_n
+
+    def test_calibrate_insufficient_data(self):
+        """Calibration with < 2 waveforms returns L as uniform_n."""
+        config = _make_config()
+        analyser = EigenAnalyser(config)
+
+        result = analyser.calibrate_uniform_n("weight_g")
+
+        assert result["uniform_n"] == 64
+        assert result["k_waveforms"] < 2

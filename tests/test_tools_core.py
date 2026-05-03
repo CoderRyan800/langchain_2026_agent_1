@@ -389,6 +389,118 @@ class TestGetAnomalousVisits:
         result = get_anomalous_visits.invoke({})
         assert "2" in result
 
+    def test_includes_gas_anomaly_summary(self, registered_cat):
+        from litterbox.tools import get_anomalous_visits
+        cat_id, _ = registered_cat
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT INTO visits
+                   (entry_time, tentative_cat_id, is_anomalous, health_notes,
+                    ammonia_z_score, methane_z_score, gas_anomaly_tier,
+                    gas_anomaly_n_samples, gas_anomaly_model_used)
+                   VALUES ('2026-01-01T08:00:00', ?, TRUE,
+                           'GPT-4o refused.', 1.08, 6.11, 'severe', 32, 'per_cat')""",
+                (cat_id,),
+            )
+        result = get_anomalous_visits.invoke({})
+        # Tier and z-scores must surface so the agent can explain the flag.
+        assert "severe" in result
+        assert "+6.11" in result
+        assert "per_cat" in result
+        assert "32" in result
+
+    def test_insufficient_data_summary_when_no_score(self):
+        from litterbox.tools import get_anomalous_visits
+        with get_conn() as conn:
+            # is_anomalous=TRUE but no gas_anomaly_* columns populated.
+            conn.execute(
+                "INSERT INTO visits (entry_time, is_anomalous, health_notes) "
+                "VALUES ('2026-01-01T08:00:00', TRUE, 'Visual concern.')"
+            )
+        result = get_anomalous_visits.invoke({})
+        assert "insufficient data" in result.lower()
+
+
+# ---------------------------------------------------------------------------
+# get_visit_details
+# ---------------------------------------------------------------------------
+
+class TestGetVisitDetails:
+    def test_unknown_visit_id_returns_clear_error(self):
+        from litterbox.tools import get_visit_details
+        result = get_visit_details.invoke({"visit_id": 99999})
+        assert "No visit found" in result
+        assert "99999" in result
+
+    def test_returns_full_block_for_anomalous_visit(self, registered_cat):
+        from litterbox.tools import get_visit_details
+        cat_id, name = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO visits
+                   (entry_time, exit_time, tentative_cat_id, is_anomalous,
+                    similarity_score, health_notes,
+                    weight_pre_g, weight_entry_g, weight_exit_g,
+                    cat_weight_g, waste_weight_g,
+                    ammonia_peak_ppb, methane_peak_ppb,
+                    ammonia_z_score, methane_z_score,
+                    gas_anomaly_tier, gas_anomaly_n_samples, gas_anomaly_model_used)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:00:30', ?,
+                           TRUE, 0.93, 'I am sorry, I cannot assist.',
+                           2000, 5200, 2090, 3200, 90,
+                           182.0, 153.0, 1.08, 6.11,
+                           'severe', 32, 'per_cat')""",
+                (cat_id,),
+            )
+            visit_id = cur.lastrowid
+        result = get_visit_details.invoke({"visit_id": visit_id})
+        # Identity
+        assert name in result
+        assert "0.93" in result
+        # Sensor block
+        assert "182.0 ppb" in result or "182.0" in result
+        assert "153.0" in result
+        assert "3200" in result   # cat weight
+        # Gas anomaly block
+        assert "severe" in result
+        assert "+1.08" in result
+        assert "+6.11" in result
+        assert "per_cat" in result
+        assert "32 prior visits" in result
+        # Health notes preserved verbatim (even when LLM refused)
+        assert "I cannot assist" in result
+        # Anomalous flag in header
+        assert "ANOMALOUS" in result
+
+    def test_normal_visit_shows_insufficient_data_block(self, registered_cat):
+        from litterbox.tools import get_visit_details
+        cat_id, _ = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO visits
+                   (entry_time, tentative_cat_id, is_anomalous, similarity_score)
+                   VALUES ('2026-01-01T08:00:00', ?, FALSE, 0.95)""",
+                (cat_id,),
+            )
+            visit_id = cur.lastrowid
+        result = get_visit_details.invoke({"visit_id": visit_id})
+        assert "insufficient data" in result.lower()
+        assert "ANOMALOUS" not in result
+
+    def test_orphan_exit_flagged_in_header(self, registered_cat):
+        from litterbox.tools import get_visit_details
+        cat_id, _ = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO visits
+                   (entry_time, tentative_cat_id, is_orphan_exit)
+                   VALUES ('2026-01-01T08:00:00', ?, TRUE)""",
+                (cat_id,),
+            )
+            visit_id = cur.lastrowid
+        result = get_visit_details.invoke({"visit_id": visit_id})
+        assert "ORPHAN EXIT" in result
+
 
 # ---------------------------------------------------------------------------
 # get_visit_images

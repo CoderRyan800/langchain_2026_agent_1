@@ -556,6 +556,27 @@ def get_visits_by_cat(cat_name: str) -> str:
     return "\n".join(lines)
 
 
+def _format_gas_anomaly_summary(row) -> str:
+    """One-line summary of the gas-anomaly score columns for a visit row.
+
+    Always callable: returns a short "insufficient data" string when the
+    detector didn't produce a score (no history, sensor null, etc.).
+    """
+    tier = row["gas_anomaly_tier"] if "gas_anomaly_tier" in row.keys() else None
+    if not tier or tier == "insufficient_data":
+        return "Gas anomaly: insufficient data"
+    parts = [f"tier={tier}"]
+    if row["ammonia_z_score"] is not None:
+        parts.append(f"NH₃ z={row['ammonia_z_score']:+.2f}")
+    if row["methane_z_score"] is not None:
+        parts.append(f"CH₄ z={row['methane_z_score']:+.2f}")
+    if row["gas_anomaly_n_samples"]:
+        parts.append(f"n={row['gas_anomaly_n_samples']}")
+    if row["gas_anomaly_model_used"]:
+        parts.append(f"model={row['gas_anomaly_model_used']}")
+    return "Gas anomaly: " + ", ".join(parts)
+
+
 @tool
 def get_anomalous_visits() -> str:
     """List all visits flagged as potentially anomalous by the health analysis."""
@@ -564,7 +585,10 @@ def get_anomalous_visits() -> str:
         rows = conn.execute(
             """SELECT v.visit_id, v.entry_time,
                       tc.name AS tentative_name, cc.name AS confirmed_name,
-                      v.is_confirmed, v.health_notes
+                      v.is_confirmed, v.health_notes,
+                      v.ammonia_z_score, v.methane_z_score,
+                      v.gas_anomaly_tier, v.gas_anomaly_n_samples,
+                      v.gas_anomaly_model_used
                FROM visits v
                LEFT JOIN cats tc ON v.tentative_cat_id = tc.cat_id
                LEFT JOIN cats cc ON v.confirmed_cat_id = cc.cat_id
@@ -584,9 +608,102 @@ def get_anomalous_visits() -> str:
         )
         status = "confirmed" if r["is_confirmed"] else "tentative ID"
         lines.append(f"\n  Visit #{r['visit_id']} — {cat} ({status}) at {r['entry_time']}")
+        lines.append(f"    {_format_gas_anomaly_summary(r)}")
         if r["health_notes"]:
             snippet = r["health_notes"][:250].replace("\n", " ")
-            lines.append(f"    {snippet}…")
+            lines.append(f"    GPT-4o: {snippet}…")
+    return "\n".join(lines)
+
+
+@tool
+def get_visit_details(visit_id: int) -> str:
+    """Return a complete report for a single visit by visit number.
+
+    Use this whenever the user asks about one specific visit ("explain visit 115",
+    "why was visit 70 flagged", "what were the readings on visit 42"). Returns
+    identity, timing, all sensor readings, the data-driven gas anomaly score
+    (tier, z-scores, sample size, model used), the GPT-4o health analysis, and
+    image paths. This is the right tool for answering 'why was visit X anomalous'.
+    """
+    init_db()
+    with get_conn() as conn:
+        r = conn.execute(
+            """SELECT v.*,
+                      tc.name AS tentative_name, cc.name AS confirmed_name
+               FROM visits v
+               LEFT JOIN cats tc ON v.tentative_cat_id = tc.cat_id
+               LEFT JOIN cats cc ON v.confirmed_cat_id = cc.cat_id
+               WHERE v.visit_id = ?""",
+            (visit_id,),
+        ).fetchone()
+
+    if not r:
+        return f"No visit found with visit_id={visit_id}."
+
+    cat = (
+        r["confirmed_name"]
+        if r["is_confirmed"]
+        else (f"~{r['tentative_name']}" if r["tentative_name"] else "Unknown")
+    )
+    id_status = "confirmed" if r["is_confirmed"] else "tentative"
+    sim = f", similarity {r['similarity_score']:.2f}" if r["similarity_score"] is not None else ""
+    flags = []
+    if r["is_anomalous"]:
+        flags.append("⚠️ ANOMALOUS")
+    if r["is_orphan_exit"]:
+        flags.append("ORPHAN EXIT")
+    flag_str = f" ({', '.join(flags)})" if flags else ""
+
+    lines = [f"Visit #{r['visit_id']}{flag_str}"]
+    lines.append(f"  Identity:  {cat} ({id_status}{sim})")
+    lines.append(f"  Entry:     {r['entry_time'] or '—'}")
+    lines.append(f"  Exit:      {r['exit_time'] or 'still open'}")
+
+    sensor_lines = []
+    if r["cat_weight_g"] is not None:
+        sensor_lines.append(f"    Cat weight:       {r['cat_weight_g']:.0f} g")
+    if r["waste_weight_g"] is not None:
+        sensor_lines.append(f"    Waste deposited:  {r['waste_weight_g']:.0f} g")
+    if r["weight_pre_g"] is not None:
+        sensor_lines.append(f"    Box pre-entry:    {r['weight_pre_g']:.0f} g")
+    if r["weight_entry_g"] is not None:
+        sensor_lines.append(f"    Box at entry:     {r['weight_entry_g']:.0f} g")
+    if r["weight_exit_g"] is not None:
+        sensor_lines.append(f"    Box at exit:      {r['weight_exit_g']:.0f} g")
+    if r["ammonia_peak_ppb"] is not None:
+        sensor_lines.append(f"    NH₃ peak:         {r['ammonia_peak_ppb']:.1f} ppb")
+    if r["methane_peak_ppb"] is not None:
+        sensor_lines.append(f"    CH₄ peak:         {r['methane_peak_ppb']:.1f} ppb")
+    if sensor_lines:
+        lines.append("  Sensors:")
+        lines.extend(sensor_lines)
+
+    # Gas anomaly detector output — full block, not the one-liner.
+    tier = r["gas_anomaly_tier"]
+    if tier and tier != "insufficient_data":
+        lines.append("  Gas anomaly detector:")
+        lines.append(f"    Tier:           {tier}")
+        if r["ammonia_z_score"] is not None:
+            lines.append(f"    NH₃ z-score:    {r['ammonia_z_score']:+.2f}")
+        if r["methane_z_score"] is not None:
+            lines.append(f"    CH₄ z-score:    {r['methane_z_score']:+.2f}")
+        if r["gas_anomaly_n_samples"]:
+            lines.append(f"    Samples:        {r['gas_anomaly_n_samples']} prior visits")
+        if r["gas_anomaly_model_used"]:
+            lines.append(f"    Model:          {r['gas_anomaly_model_used']}")
+    else:
+        lines.append("  Gas anomaly detector: insufficient data")
+
+    if r["health_notes"]:
+        lines.append("  Health analysis (GPT-4o):")
+        for ln in r["health_notes"].splitlines():
+            lines.append(f"    {ln}")
+
+    if r["entry_image_path"]:
+        lines.append(f"  Entry image: {r['entry_image_path']}")
+    if r["exit_image_path"]:
+        lines.append(f"  Exit image:  {r['exit_image_path']}")
+
     return "\n".join(lines)
 
 
@@ -825,6 +942,7 @@ ALL_TOOLS = [
     retroactive_recognition,
     get_visits_by_date,
     get_visits_by_cat,
+    get_visit_details,
     get_anomalous_visits,
     get_unconfirmed_visits,
     get_visit_images,

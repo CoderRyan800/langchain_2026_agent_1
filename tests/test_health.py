@@ -4,7 +4,13 @@ No LLM or CLIP calls — entirely offline.
 """
 
 import pytest
-from litterbox.health import build_health_prompt, parse_health_response, HEALTH_PROMPT
+from litterbox.health import (
+    build_health_prompt,
+    parse_health_response,
+    safe_health_notes,
+    HEALTH_PROMPT,
+    UNSTRUCTURED_RESPONSE_PLACEHOLDER,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -219,3 +225,65 @@ class TestParseHealthResponse:
         text = "CONCERNS_PRESENT: yes\nCONCERNS_PRESENT: no"
         anomalous, _ = parse_health_response(text)
         assert anomalous is True
+
+
+# ---------------------------------------------------------------------------
+# safe_health_notes — refusal / malformed-response sanitiser
+# ---------------------------------------------------------------------------
+
+class TestSafeHealthNotes:
+    def test_structured_response_passes_through(self):
+        text = "CONCERNS_PRESENT: no\nDESCRIPTION: clean\nOWNER_SUMMARY: fine"
+        assert safe_health_notes(text) == text
+
+    def test_anomalous_response_passes_through(self):
+        text = "CONCERNS_PRESENT: yes\nDESCRIPTION: blood\nOWNER_SUMMARY: vet now"
+        assert safe_health_notes(text) == text
+
+    def test_lowercase_marker_still_passes(self):
+        # safe_health_notes is case-insensitive on the marker check.
+        text = "concerns_present: no\nrest of response..."
+        assert safe_health_notes(text) == text
+
+    def test_content_policy_refusal_replaced(self):
+        # The exact phrasing seen in production from OpenAI's content filter.
+        for refusal in [
+            "I'm sorry, I can't assist with images containing people.",
+            "I'm sorry, I can't assist with identifying or comparing individuals in images.",
+            "I'm unable to view the litter box images. Please try again.",
+            "I'm sorry, I can't analyze these images.",
+        ]:
+            assert safe_health_notes(refusal) == UNSTRUCTURED_RESPONSE_PLACEHOLDER
+
+    def test_empty_response_replaced(self):
+        assert safe_health_notes("") == UNSTRUCTURED_RESPONSE_PLACEHOLDER
+
+    def test_malformed_unstructured_response_replaced(self):
+        # No marker → replace, even if the content looks vaguely on-topic.
+        assert safe_health_notes(
+            "The cat looked fine."
+        ) == UNSTRUCTURED_RESPONSE_PLACEHOLDER
+
+    def test_placeholder_mentions_fallback(self):
+        # The placeholder text must direct the reader to the gas-anomaly
+        # data, otherwise the agent has nothing to say when retrieving it.
+        assert "gas_anomaly_tier" in UNSTRUCTURED_RESPONSE_PLACEHOLDER
+        assert "z-score" in UNSTRUCTURED_RESPONSE_PLACEHOLDER.lower()
+
+
+# ---------------------------------------------------------------------------
+# build_health_prompt — anti-refusal preamble
+# ---------------------------------------------------------------------------
+
+class TestBuildHealthPromptAntiRefusal:
+    def test_preamble_explicitly_states_no_people(self):
+        # Prevents OpenAI's content filter from refusing on litter pareidolia.
+        prompt = build_health_prompt()
+        text = prompt.lower()
+        assert "no people" in text or "no humans" in text
+
+    def test_preamble_addresses_pareidolia(self):
+        # The clarification calls out litter shapes specifically so the
+        # model doesn't treat clumps or shadows as faces.
+        prompt = build_health_prompt()
+        assert "litter" in prompt.lower()

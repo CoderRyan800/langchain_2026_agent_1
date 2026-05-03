@@ -12,7 +12,7 @@ from langchain_openai import ChatOpenAI
 
 from litterbox.db import get_conn, init_db
 from litterbox.embeddings import add_to_index, find_candidates, ID_THRESHOLD
-from litterbox.health import build_health_prompt, parse_health_response
+from litterbox.health import build_health_prompt, parse_health_response, safe_health_notes
 from litterbox.gas_anomaly import score_gas_visit, ALARM_TIERS
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -388,7 +388,8 @@ def record_exit(
         gas_anomaly_model_used=gas_score["model_used"],
     )
     health_text = _run_gpt4o_vision(health_prompt, entry_image_abs, str(src))
-    llm_anomalous, health_notes = parse_health_response(health_text)
+    llm_anomalous, _raw_notes = parse_health_response(health_text)
+    health_notes = safe_health_notes(health_text)
 
     # Detector tiers in ALARM_TIERS flip is_anomalous regardless of LLM verdict.
     is_anomalous = llm_anomalous or (gas_score["overall_tier"] in ALARM_TIERS)

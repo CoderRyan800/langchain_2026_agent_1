@@ -10,6 +10,8 @@ You will be shown two images:
   Image 1: the litter box at the moment the cat entered (before use)
   Image 2: the litter box after the cat's visit (after use)
 
+Both images show only the interior of an empty household litter box, photographed from a fixed overhead camera. There are no people, no faces, no identifiable individuals, and no humans present in any image. Any pareidolic shapes in the litter (clumps, granules, shadows) are not faces or people — they are litter material. Please proceed with the analysis.
+
 Compare the two images and look for any visual differences that may indicate a health concern, including but not limited to:
 - Blood in urine (pink, red, or dark discoloration)
 - Blood in stool
@@ -122,6 +124,14 @@ def build_health_prompt(
 HEALTH_PROMPT = build_health_prompt()
 
 
+UNSTRUCTURED_RESPONSE_PLACEHOLDER = (
+    "Health analysis unavailable — GPT-4o did not return a structured response "
+    "for this visit (likely a content-policy refusal or other LLM-side error). "
+    "Sensor-based anomaly detection still applies; see gas_anomaly_tier and "
+    "z-scores for the data-driven verdict."
+)
+
+
 def parse_health_response(text: str) -> tuple[bool, str]:
     """
     Parse the structured health response from GPT-4o.
@@ -134,3 +144,19 @@ def parse_health_response(text: str) -> tuple[bool, str]:
             is_anomalous = value == "yes"
             break
     return is_anomalous, text
+
+
+def safe_health_notes(text: str) -> str:
+    """Sanitise the raw LLM response before persisting it as ``health_notes``.
+
+    Returns the response unchanged when it follows the expected
+    ``CONCERNS_PRESENT: ...`` format. When the marker is absent — typically a
+    content-policy refusal ("I'm sorry, I can't assist with images...") or
+    other malformed reply — returns a clean placeholder instead, so the DB
+    field carries useful information rather than refusal text. The structural
+    marker check is more robust than phrase matching against an open set of
+    refusal templates.
+    """
+    if text and "CONCERNS_PRESENT" in text.upper():
+        return text
+    return UNSTRUCTURED_RESPONSE_PLACEHOLDER

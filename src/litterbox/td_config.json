@@ -50,6 +50,17 @@
   "image_retention_days": 7,
   "_comment2": "Camera images from visits are deleted after this many days.",
 
+  "gas_anomaly": {
+    "min_visits_per_cat": 10,
+    "min_visits_pooled":   30,
+    "z_score_thresholds": {
+      "mild":         2.0,
+      "significant":  3.0,
+      "severe":       5.0
+    },
+    "_comment": "Per-cat data-driven gas anomaly detector. Each cat's NH3 and CH4 peak readings are log1p-transformed and fit to a univariate Gaussian; new visits are scored as signed z-scores. Only the high-side tail (z >= threshold) triggers an alarm — low gas is not a concern. min_visits_per_cat: minimum prior non-null readings required for a per-cat model. min_visits_pooled: minimum across the whole population for the pooled fallback. Below pooled minimum the detector returns 'insufficient_data' and contributes no signal."
+  },
+
   "eigen": {
     "resample_length": 64,
     "explained_variance_threshold": 0.95,

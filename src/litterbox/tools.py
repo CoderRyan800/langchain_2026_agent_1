@@ -13,6 +13,7 @@ from langchain_openai import ChatOpenAI
 from litterbox.db import get_conn, init_db
 from litterbox.embeddings import add_to_index, find_candidates, ID_THRESHOLD
 from litterbox.health import build_health_prompt, parse_health_response
+from litterbox.gas_anomaly import score_gas_visit, ALARM_TIERS
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 IMAGES_DIR = PROJECT_ROOT / "images"
@@ -358,7 +359,20 @@ def record_exit(
             "SELECT * FROM visits WHERE visit_id = ?", (visit_id,)
         ).fetchone()
 
-    # Health analysis — compare entry and exit images, enriched with sensor data
+    # Data-driven gas anomaly score against this cat's history. Excludes the
+    # current visit_id so the new datum doesn't bias its own fit.
+    scoring_cat_id = visit_row["confirmed_cat_id"] or visit_row["tentative_cat_id"]
+    with get_conn() as conn:
+        gas_score = score_gas_visit(
+            conn,
+            cat_id=scoring_cat_id,
+            ammonia_peak_ppb=visit_row["ammonia_peak_ppb"],
+            methane_peak_ppb=visit_row["methane_peak_ppb"],
+            exclude_visit_id=visit_id,
+        )
+
+    # Health analysis — entry/exit images plus sensor data and (if available)
+    # the gas-anomaly tier signal grounded in this cat's own history.
     health_prompt = build_health_prompt(
         weight_pre_g=visit_row["weight_pre_g"],
         weight_entry_g=visit_row["weight_entry_g"],
@@ -367,14 +381,39 @@ def record_exit(
         waste_weight_g=waste_weight_g,
         ammonia_peak_ppb=visit_row["ammonia_peak_ppb"],
         methane_peak_ppb=visit_row["methane_peak_ppb"],
+        ammonia_z_score=gas_score["ammonia_z"],
+        methane_z_score=gas_score["methane_z"],
+        gas_anomaly_tier=gas_score["overall_tier"],
+        gas_anomaly_n_samples=gas_score["n_samples"],
+        gas_anomaly_model_used=gas_score["model_used"],
     )
     health_text = _run_gpt4o_vision(health_prompt, entry_image_abs, str(src))
-    is_anomalous, health_notes = parse_health_response(health_text)
+    llm_anomalous, health_notes = parse_health_response(health_text)
+
+    # Detector tiers in ALARM_TIERS flip is_anomalous regardless of LLM verdict.
+    is_anomalous = llm_anomalous or (gas_score["overall_tier"] in ALARM_TIERS)
 
     with get_conn() as conn:
         conn.execute(
-            "UPDATE visits SET health_notes = ?, is_anomalous = ? WHERE visit_id = ?",
-            (health_notes, is_anomalous, visit_id),
+            """UPDATE visits SET
+                   health_notes           = ?,
+                   is_anomalous           = ?,
+                   ammonia_z_score        = ?,
+                   methane_z_score        = ?,
+                   gas_anomaly_tier       = ?,
+                   gas_anomaly_n_samples  = ?,
+                   gas_anomaly_model_used = ?
+               WHERE visit_id = ?""",
+            (
+                health_notes,
+                is_anomalous,
+                gas_score["ammonia_z"],
+                gas_score["methane_z"],
+                gas_score["overall_tier"],
+                gas_score["n_samples"],
+                gas_score["model_used"],
+                visit_id,
+            ),
         )
         tentative = conn.execute(
             """SELECT c.name FROM visits v

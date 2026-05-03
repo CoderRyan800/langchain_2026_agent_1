@@ -144,13 +144,18 @@ def init_db() -> None:
         # Idempotent migration: add sensor columns to visits if this is an older DB
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(visits)")}
         new_cols = [
-            ("weight_pre_g",     "REAL"),
-            ("weight_entry_g",   "REAL"),
-            ("weight_exit_g",    "REAL"),
-            ("cat_weight_g",     "REAL"),
-            ("waste_weight_g",   "REAL"),
-            ("ammonia_peak_ppb", "REAL"),
-            ("methane_peak_ppb", "REAL"),
+            ("weight_pre_g",            "REAL"),
+            ("weight_entry_g",          "REAL"),
+            ("weight_exit_g",           "REAL"),
+            ("cat_weight_g",            "REAL"),
+            ("waste_weight_g",          "REAL"),
+            ("ammonia_peak_ppb",        "REAL"),
+            ("methane_peak_ppb",        "REAL"),
+            ("ammonia_z_score",         "REAL"),
+            ("methane_z_score",         "REAL"),
+            ("gas_anomaly_tier",        "TEXT"),
+            ("gas_anomaly_n_samples",   "INTEGER"),
+            ("gas_anomaly_model_used",  "TEXT"),
         ]
         for col, typ in new_cols:
             if col not in existing_cols:

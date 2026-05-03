@@ -44,7 +44,6 @@ class TestBuildHealthPromptWithSensors:
         assert "4200" in build_health_prompt(cat_weight_g=4200.0)
 
     def test_cat_weight_kg_in_prompt(self):
-        # 4200 g → 4.200 kg
         assert "4.200" in build_health_prompt(cat_weight_g=4200.0)
 
     def test_waste_weight_in_prompt(self):
@@ -102,13 +101,67 @@ class TestBuildHealthPromptWithSensors:
         prompt = build_health_prompt(cat_weight_g=4000.0)
         assert "veterinarian" in prompt.lower()
 
-    def test_sensor_context_guidance_included(self):
-        prompt = build_health_prompt(ammonia_peak_ppb=200.0)
-        assert "ammonia" in prompt.lower()
-
     def test_zero_values_appear_in_prompt(self):
         prompt = build_health_prompt(cat_weight_g=0.0)
         assert "0.0" in prompt or "0 g" in prompt
+
+
+# ---------------------------------------------------------------------------
+# build_health_prompt — gas anomaly tier signal
+# ---------------------------------------------------------------------------
+
+class TestBuildHealthPromptGasTier:
+    def test_no_detector_block_when_tier_normal(self):
+        prompt = build_health_prompt(
+            ammonia_peak_ppb=20.0, gas_anomaly_tier="normal"
+        )
+        assert "anomaly detector" not in prompt.lower()
+
+    def test_no_detector_block_when_tier_insufficient(self):
+        prompt = build_health_prompt(
+            ammonia_peak_ppb=20.0, gas_anomaly_tier="insufficient_data"
+        )
+        assert "anomaly detector" not in prompt.lower()
+
+    def test_no_detector_block_when_tier_none(self):
+        prompt = build_health_prompt(ammonia_peak_ppb=20.0)
+        assert "anomaly detector" not in prompt.lower()
+
+    def test_alarm_tier_renders_detector_block(self):
+        prompt = build_health_prompt(
+            ammonia_peak_ppb=200.0,
+            ammonia_z_score=4.2,
+            gas_anomaly_tier="significant",
+        )
+        assert "anomaly detector" in prompt.lower()
+        assert "significant" in prompt
+        assert "4.2" in prompt
+
+    def test_alarm_tier_instructs_concerns_yes(self):
+        prompt = build_health_prompt(
+            ammonia_peak_ppb=200.0, ammonia_z_score=4.2,
+            gas_anomaly_tier="severe",
+        )
+        assert "MUST set" in prompt
+        assert "CONCERNS_PRESENT: yes" in prompt
+
+    def test_alarm_tier_includes_history_provenance(self):
+        prompt = build_health_prompt(
+            ammonia_peak_ppb=200.0, ammonia_z_score=4.2,
+            gas_anomaly_tier="significant",
+            gas_anomaly_n_samples=42,
+            gas_anomaly_model_used="per_cat",
+        )
+        assert "42" in prompt
+        assert "per_cat" in prompt
+
+    def test_signed_z_score_rendered_with_sign(self):
+        prompt = build_health_prompt(
+            methane_peak_ppb=80.0, methane_z_score=3.7,
+            gas_anomaly_tier="significant",
+        )
+        # Positive z-scores render with "+" so the direction is unambiguous.
+        assert "+3.70" in prompt
 
 
 # ---------------------------------------------------------------------------

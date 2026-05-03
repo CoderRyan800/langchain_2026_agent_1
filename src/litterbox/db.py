@@ -156,6 +156,7 @@ def init_db() -> None:
             ("gas_anomaly_tier",        "TEXT"),
             ("gas_anomaly_n_samples",   "INTEGER"),
             ("gas_anomaly_model_used",  "TEXT"),
+            ("gas_anomaly_rescored_at", "TIMESTAMP"),
         ]
         for col, typ in new_cols:
             if col not in existing_cols:

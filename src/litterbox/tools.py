@@ -889,6 +889,39 @@ def list_cats() -> str:
 
 
 @tool
+def plot_cat_history(cat_name: str, days: int = 90) -> str:
+    """Generate an HTML history plot for one cat's recent visits.
+
+    Use this whenever the user asks for a chart, plot, graph, trend, or
+    visualisation of a cat's weight or gas-reading history. Produces a
+    self-contained HTML file with three stacked time-series sub-plots
+    (weight, NH₃ peak, CH₄ peak), linked time axis, anomalous visits
+    rendered as red ✕ markers, normal visits as small blue dots, and
+    hover tooltips showing per-visit data including z-scores and tier.
+    Reference dashed lines on the gas channels show where the alarm tiers
+    kick in for this specific cat.
+
+    Returns the absolute path to the generated HTML file. The user opens
+    it in any browser — Bokeh JS is inlined, no internet required.
+
+    cat_name: registered cat's name.
+    days:     how many days of history to plot (default 90).
+    """
+    from litterbox.history_plot import plot_cat_history as _plot
+
+    try:
+        path = _plot(cat_name, days=days)
+    except ValueError as e:
+        return f"Error: {e}"
+    return (
+        f"History plot for {cat_name} (last {days} days) saved to:\n"
+        f"  {path}\n"
+        f"Open this file in any browser to view weight, NH₃, and CH₄ trends. "
+        f"Anomalous visits are marked in red."
+    )
+
+
+@tool
 def eigen_report(cat_name: str) -> str:
     """Generate an eigenanalysis report for a cat's time-domain visit waveforms.
 
@@ -948,5 +981,6 @@ ALL_TOOLS = [
     get_unconfirmed_visits,
     get_visit_images,
     list_cats,
+    plot_cat_history,
     eigen_report,
 ]

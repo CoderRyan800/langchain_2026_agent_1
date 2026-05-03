@@ -708,10 +708,13 @@ if __name__ == "__main__":
 
 ## 8. Understanding Health Alerts
 
-### What is analysed
+### Two independent checks, OR'd together
 
-After every exit event, GPT-4o compares the entry and exit images of the
-litter box. It looks for visual differences that may indicate a health concern:
+Every exit event is evaluated by **two** detectors. A visit is flagged as
+anomalous (`is_anomalous = TRUE`) if **either** detector says so.
+
+**1. GPT-4o visual analysis.** Compares the entry and exit images for visual
+differences that may indicate a health concern:
 
 - Blood in urine (pink, red, or dark discolouration of urine clumps)
 - Blood in stool
@@ -720,9 +723,44 @@ litter box. It looks for visual differences that may indicate a health concern:
 - Abnormal deposits or clumping patterns
 - Any other unexpected visual changes
 
-When sensor readings are available, they are included in the prompt and improve
-detection of anomalies such as elevated ammonia (potential urinary issues) or
-unexpectedly large waste deposits.
+When sensor readings are available they are included in the prompt; when the
+gas detector below has flagged a tier, that tier is also passed in so the
+LLM's `DESCRIPTION` and `OWNER_SUMMARY` can ground the explanation in the
+statistical anomaly rather than guessing from raw numbers.
+
+**2. Data-driven gas anomaly detector.** Per-cat statistical check on the
+NH₃ and CH₄ peak readings. The detector judges each visit relative to the
+cat's *own* history — there are no fixed ppb thresholds, because absolute
+gas readings depend on sensor placement, ventilation, ambient conditions,
+and chip-to-chip calibration drift, and have no portable meaning.
+
+How it works:
+
+- Fit a robust log-Gaussian (median + MAD-based sigma) on the cat's prior
+  non-null peak readings for each channel. Robust statistics so historical
+  contamination by past anomalies doesn't suppress new ones (50% breakdown
+  point — the detector keeps working even if up to half the cat's history
+  is anomalous).
+- Compute a signed z-score for the current visit's reading. Only the
+  positive tail (high readings) raises an alarm — low gas is not a concern.
+- Tier the result: `mild` (z ≥ 2σ), `significant` (z ≥ 3σ), `severe` (z ≥ 5σ).
+- If a cat has fewer than `min_visits_per_cat` prior readings (default 10),
+  fall back to a pooled distribution across all cats. If even the pool is
+  too small (default minimum 30), tier is `insufficient_data` and the
+  detector contributes no signal.
+- All thresholds live in `src/litterbox/td_config.json` under `gas_anomaly`
+  and can be tuned per deployment without code changes.
+
+The detector's z-scores, tier, sample count, and model type (`per_cat`,
+`pooled`, or `insufficient_data`) are persisted on the `visits` row for
+later SQL queries and reports — see §9 for the schema.
+
+**Caveat:** if a cat genuinely transitions to a chronic high-NH₃ state and
+accumulates many readings there, future high readings will eventually look
+normal to the detector. That's medically defensible (a stable chronic
+state is the cat's new normal, not an acute event), but if you want to
+catch slow drift, watch the trend in the `*_z_score` columns over time
+rather than just the tier.
 
 ### What a flagged alert looks like
 
@@ -860,6 +898,12 @@ CREATE TABLE visits (
     waste_weight_g    REAL,            -- derived: exit − pre
     ammonia_peak_ppb  REAL,            -- peak NH₃ (MAX of entry & exit)
     methane_peak_ppb  REAL,            -- peak CH₄ (MAX of entry & exit)
+    -- Gas anomaly detector output (see §8 — Understanding Health Alerts)
+    ammonia_z_score        REAL,       -- signed z-score vs cat's history
+    methane_z_score        REAL,
+    gas_anomaly_tier       TEXT,       -- normal | mild | significant | severe | insufficient_data
+    gas_anomaly_n_samples  INTEGER,    -- size of the historical fit
+    gas_anomaly_model_used TEXT,       -- per_cat | pooled | insufficient_data
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```

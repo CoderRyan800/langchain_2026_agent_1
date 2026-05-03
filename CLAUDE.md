@@ -55,14 +55,14 @@ python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 489 tests, ~30 s
+pytest -m "not slow"    # 529 tests, ~20 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 509 tests
+pytest                  # all 549 tests
 ```
 
 Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
 
-Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser), `test_tools_core.py` (query tools), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration).
+Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser), `test_tools_core.py` (query tools), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector).
 
 ## Architecture
 
@@ -76,7 +76,8 @@ Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt bui
 - Memory: `data/agent_litterbox_memory.db`; thread IDs `"sensor"` vs `"interactive"` maintain separate histories
 - **`src/litterbox/db.py`** — SQLite schema (cats, cat_images, visits, visit_sensor_events); `init_db()` is idempotent with automatic migration for old DBs missing sensor columns
 - **`src/litterbox/embeddings.py`** — CLIP (`clip-ViT-B-32`, downloads ~350 MB on first run) + Chroma vector search; `ID_THRESHOLD = 0.82`
-- **`src/litterbox/health.py`** — `build_health_prompt(**sensor_kwargs)` assembles the GPT-4o prompt with optional sensor readings; `HEALTH_PROMPT` constant preserved for backward compatibility; `parse_health_response()` unchanged
+- **`src/litterbox/health.py`** — `build_health_prompt(**sensor_kwargs)` assembles the GPT-4o prompt with optional sensor readings and (when an alarm tier is provided) a "Statistical sensor anomaly detector output" block grounded in the cat's own history; `HEALTH_PROMPT` constant preserved for backward compatibility; `parse_health_response()` unchanged
+- **`src/litterbox/gas_anomaly.py`** — Data-driven per-cat NH₃/CH₄ detector. Median + MAD-based sigma on `log1p`-transformed peak readings, signed z-scores, alarm only on the high tail, tier ∈ {`normal`, `mild`≥2σ, `significant`≥3σ, `severe`≥5σ, `insufficient_data`}. Fits on demand from the `visits` table — no separate persisted model. Per-cat fit when ≥`min_visits_per_cat` non-null readings, else pooled fallback at ≥`min_visits_pooled`, else `insufficient_data`. Excludes the current visit_id from its own fit. Robust statistics (50% breakdown point) so historical contamination by prior anomalies doesn't suppress new ones.
 - **`src/litterbox/tools.py`** — 11 `@tool` functions; docstrings auto-generate LangChain tool descriptions
 
 ### Two-Stage Cat ID Pipeline
@@ -88,13 +89,18 @@ If no candidate passes both stages, the visit is recorded unconfirmed for human 
 ### Sensor Data Ingestion
 Each visit can capture readings from a weight scale and gas sensors. Data flows two ways:
 
-- **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings)
+- **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings); plus the gas-anomaly score persisted by `record_exit`: `ammonia_z_score`, `methane_z_score`, `gas_anomaly_tier`, `gas_anomaly_n_samples`, `gas_anomaly_model_used` (`per_cat`, `pooled`, or `insufficient_data`).
 - **Time-series log in `visit_sensor_events`**: one row per reading with `phase` (pre_entry / entry / exit), `sensor_type`, `value_numeric`, and `unit`
 
 CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`. All are optional — omit any that are unavailable or malfunctioning. The flags are serialised into the sensor event prompt string; the LLM extracts the named values and passes them to the tool. See `docs/USER_GUIDE.md` §6 for full CLI examples and derivation rules.
 
 ### Health Analysis
-`record_exit()` sends entry+exit images to GPT-4o; sensor readings are included in the prompt when available. Response stored in `visits.health_notes` with `is_anomalous` flag. Response always includes a mandatory veterinary disclaimer.
+`record_exit()` runs two parallel checks and ORs their verdicts into `visits.is_anomalous`:
+
+1. **GPT-4o visual analysis.** Entry+exit images plus any sensor readings are sent to GPT-4o; response stored in `visits.health_notes`. Always includes a mandatory veterinary disclaimer.
+2. **Data-driven gas anomaly score** (`gas_anomaly.py`). NH₃ and CH₄ peak readings are scored as signed z-scores against a per-cat (or pooled-fallback) robust log-Gaussian fit. The tier is injected into the LLM prompt as a "Statistical sensor anomaly detector output" block grounded in the cat's own history (not raw ppb thresholds — absolute gas readings are deployment-dependent and have no portable meaning). Tiers ∈ {`mild`, `significant`, `severe`} flip `is_anomalous` regardless of the LLM verdict. Z-scores and tier are persisted on the visit row for SQL queries and reports.
+
+Configuration lives in `td_config.json` under `gas_anomaly` (`min_visits_per_cat`, `min_visits_pooled`, `z_score_thresholds`).
 
 ### Runtime Data (gitignored)
 - `data/litterbox.db` — SQLite metadata
@@ -205,6 +211,16 @@ All time-domain modules read from this file; nothing is hard-coded.
       "significant": -3.0,
       "major":       -4.0
     }
+  },
+
+  "gas_anomaly": {
+    "min_visits_per_cat": 10,           // min non-null prior readings for a per-cat fit
+    "min_visits_pooled":  30,           // min across the population for the pooled fallback
+    "z_score_thresholds": {             // signed z, only the high tail alarms
+      "mild":         2.0,
+      "significant":  3.0,
+      "severe":       5.0
+    }
   }
 }
 ```
@@ -224,6 +240,11 @@ Key design notes:
   described in the Step 5 section below. `uniform_n` is calibrated empirically
   by the simulator so all per-cat and pooled models share a coefficient
   dimensionality (currently 4) — required by the Layer 2 GMM clusterer.
+- The `gas_anomaly` block configures the per-cat NH₃/CH₄ anomaly detector
+  (`gas_anomaly.py`). Robust log-Gaussian fit on each cat's prior peak
+  readings; signed z-score on the new visit; only the high tail raises an
+  alarm. See the **Health Analysis** section above and `docs/USER_GUIDE.md`
+  §8 for the design rationale.
 
 ---
 

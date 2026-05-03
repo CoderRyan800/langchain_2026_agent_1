@@ -258,7 +258,19 @@ entirely offline and complete in about 12 seconds.
 | `tests/test_time_buffer.py` | 1 | `RollingBuffer` + `load_td_config()` | 42 |
 | `tests/test_sensor_collector.py` | 2 | `BaseDriver`, all 5 driver classes, `SensorCollector` | 38 |
 | `tests/test_visit_trigger.py` | 3 | `VisitTrigger` state machine | 34 |
-| **Total** | | | **114** |
+| `tests/test_visit_analyser.py` | 4 | `VisitAnalyser`, `TdVisitRecord`, image retention | 23 |
+| `tests/test_eigen_analyser.py` | 5a | Eigendecomposition, EV scoring, regularization, DC trending | 35 |
+| `tests/test_eigen_query.py` | 5b | Read-side query helpers and report integration | 15 |
+| `tests/test_cluster_analyser.py` | 5c | GMM+BIC clustering on expansion coefficients | 15 |
+| `tests/test_analyser_pipeline.py` | 5  | Plugin orchestration (resample → eigen → cluster) | 24 |
+| `tests/test_gas_anomaly.py` | —  | Data-driven NH₃/CH₄ detector (median + MAD on log-readings) | 35 |
+| **Step subtotal** | | | **261** |
+
+The full pytest suite (this table plus the legacy non-time-domain tests
+under `test_db.py`, `test_health.py`, `test_tools_*.py`, `test_integration.py`,
+`test_api.py`) currently runs **529 non-slow tests** in about 20 s. Add
+`pytest -m slow` for an additional 20 CLIP-embedding tests (model download
+on first run).
 
 ### Running the time-domain tests
 

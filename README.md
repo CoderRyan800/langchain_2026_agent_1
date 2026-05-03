@@ -94,7 +94,7 @@ You: Show me all anomalous visits this month
 You: Visit 7 is confirmed as Whiskers
 ```
 
-**Sensor-triggered** — called automatically by the camera system on entry and exit events. The agent runs without human input: it identifies the cat using a two-stage pipeline (local CLIP embeddings + GPT-4o visual confirmation), stores the visit record, and on exit runs a GPT-4o health analysis comparing the before and after images of the litter box.
+**Sensor-triggered** — called automatically by the camera system on entry and exit events. The agent runs without human input: it identifies the cat using a two-stage pipeline (local CLIP embeddings + GPT-4o visual confirmation), stores the visit record, and on exit runs two parallel checks for health concerns: a GPT-4o visual analysis of the entry/exit images, and a per-cat data-driven anomaly score on the NH₃/CH₄ peak readings (signed z-score against the cat's own history; see `docs/USER_GUIDE.md` §8). Either check flagging the visit marks it as anomalous.
 
 Optional sensor data (weight scale and ammonia/methane gas sensors) can be passed via CLI flags:
 
@@ -160,12 +160,14 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │       ├── db.py                # SQLite schema and query helpers
 │       ├── embeddings.py        # Local CLIP embeddings + Chroma vector search
 │       ├── health.py            # GPT-4o health analysis prompt and parser
+│       ├── gas_anomaly.py       # Per-cat data-driven NH₃/CH₄ detector (median + MAD)
 │       └── tools.py             # All 11 LangChain tools (record_entry/exit accept sensor data)
 ├── tests/
 │   ├── run_manual_test.py       # Manual integration test runner (8 phases, 80+ checks)
 │   ├── conftest.py              # Shared pytest fixtures and isolation helpers
 │   ├── test_db.py               # Schema, migration, and constraint tests
 │   ├── test_health.py           # Health prompt builder and response parser tests
+│   ├── test_gas_anomaly.py      # Per-cat data-driven gas anomaly detector tests
 │   ├── test_tools_core.py       # Query and management tool tests
 │   ├── test_tools_sensor.py     # record_entry / record_exit sensor tests
 │   ├── test_integration.py      # Full visit lifecycle integration tests
@@ -179,8 +181,8 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │   ├── sim_report.py            # Markdown report generator
 │   ├── cat_pictures/            # Real photos: Anna, Luna, Marina, Natasha
 │   ├── assets/                  # Generated placeholder box images
-│   ├── sim_ground_truth.json    # Per-event ground truth from last run
-│   └── simulation_report.md     # Accuracy report from last run
+│   ├── sim_ground_truth.json    # Per-event ground truth from last run (gitignored)
+│   └── simulation_report.md     # Accuracy report from last run (gitignored)
 ├── docs/
 │   ├── USER_GUIDE.md            # Full user guide
 │   └── TESTING.md               # Test procedure and baseline results

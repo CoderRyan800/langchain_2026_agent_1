@@ -183,8 +183,8 @@ class RollingBuffer:
         buf = RollingBuffer(window_minutes=10, samples_per_minute=12)
         # capacity = 120 entries (one every 5 seconds for 10 minutes)
 
-        buf.append(datetime.utcnow(), {"weight_g": 4200.0})
-        buf.append(datetime.utcnow(), {"weight_g": 7100.0, "ammonia_ppb": 18.0})
+        buf.append(datetime.now(timezone.utc), {"weight_g": 4200.0})
+        buf.append(datetime.now(timezone.utc), {"weight_g": 7100.0, "ammonia_ppb": 18.0})
 
         buf.get_channel("weight_g")    # → [4200.0, 7100.0]
         buf.get_channel("ammonia_ppb") # → [None, 18.0]   (None for missing key)

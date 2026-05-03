@@ -55,14 +55,14 @@ python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 180 tests, ~10 s
+pytest -m "not slow"    # 489 tests, ~30 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 200 tests
+pytest                  # all 509 tests
 ```
 
 Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
 
-Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser), `test_tools_core.py` (query tools), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow).
+Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser), `test_tools_core.py` (query tools), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration).
 
 ## Architecture
 
@@ -177,7 +177,35 @@ All time-domain modules read from this file; nothing is hard-coded.
                                             //     a brief spike from a wrong cat)
   },
 
-  "image_retention_days": 7    // camera images from visits deleted after this many days
+  "image_retention_days": 7,   // camera images from visits deleted after this many days
+
+  "eigen": {
+    "resample_length":              64,    // L — fixed length all waveforms are resampled to
+    "explained_variance_threshold": 0.95,  // cumulative eigenvalue ratio to pick N signal components
+    "pooled_minimum":               128,   // 2L — min waveforms before fitting the pooled model
+    "per_cat_minimum":              32,    // L/2 — min per-cat waveforms (uses Tikhonov reg.)
+    "regularization_epsilon":       0.01,  // ridge added to per-cat covariance for stability
+    "max_nan_fraction":             0.25,  // waveform rejected if more than this fraction is NaN
+    "anomaly_thresholds": {                // EV bands → normal/mild/significant/severe
+      "normal":      0.90,
+      "mild":        0.70,
+      "significant": 0.40
+    },
+    "uniform_n":          4,    // forces fixed N for all models (fixed-length coeff vectors for ML)
+    "uniform_n_coverage": 0.95  // fraction of waveforms that must hit ev_threshold at calibrated N
+  },
+
+  "cluster": {
+    "min_samples_for_clustering": 20,   // min scored waveforms before clustering activates
+    "min_samples_per_cluster":    15,   // min points per GMM component (avoids ill-conditioned cov.)
+    "max_clusters":                5,   // BIC sweep upper bound for k
+    "n_init":                      5,   // EM restarts per GMM fit
+    "z_score_thresholds": {             // log-likelihood z-score cutoffs
+      "mild":        -2.0,
+      "significant": -3.0,
+      "major":       -4.0
+    }
+  }
 }
 ```
 
@@ -192,6 +220,10 @@ Key design notes:
   `similarity_anna`).  K varies with the number of registered cats.
 - The `trigger` block holds all state-machine thresholds.  Any threshold
   can be tuned without touching code.
+- The `eigen` and `cluster` blocks configure the two-layer anomaly detection
+  described in the Step 5 section below. `uniform_n` is calibrated empirically
+  by the simulator so all per-cat and pooled models share a coefficient
+  dimensionality (currently 4) — required by the Layer 2 GMM clusterer.
 
 ---
 
@@ -593,7 +625,58 @@ VisitAnalyser
   leaves newer ones intact.
 - `confirm_identity` with `td_visit_id` updates the correct table.
 
-**Step 4 status: NOT STARTED**
+**Step 4 status: COMPLETE** — `visit_analyser.py`, `image_retention.py`, `td_visits` schema, 24 tests pass.
+
+---
+
+### Step 5 — Eigenanalysis & Cluster Analysis (Two-Layer Anomaly Detection)
+
+After Step 4 stores per-visit waveforms, two further analysis layers run on the
+accumulated history. The full design lives in
+`docs/USER_GUIDE.md` §12.10–12.15; this section is the architectural summary.
+
+**Layer 1 — Eigendecomposition (`src/litterbox/eigen_analyser.py`):**
+- Each waveform channel (weight, ammonia, methane) is resampled to a fixed
+  length L (default 64) so visits of different durations are commensurable.
+- A pooled model (all cats, ≥`pooled_minimum`=2L waveforms) and per-cat models
+  (≥`per_cat_minimum`=L/2 waveforms each) are fit by computing the eigen-
+  decomposition of the sample covariance matrix. Per-cat models use Tikhonov
+  regularization (`regularization_epsilon`) since they are typically rank-
+  deficient.
+- N signal components are selected so cumulative explained variance crosses
+  `explained_variance_threshold` (default 0.95). When `uniform_n` is set
+  (currently 4, calibrated to give 0.95 coverage), all models use that fixed N
+  — this produces fixed-length coefficient vectors needed by Layer 2.
+- Each new waveform is projected onto its model and scored by *explained
+  variance* (EV); thresholds (`anomaly_thresholds`) classify as
+  normal / mild / significant / severe.
+- DC (mean) trending is tracked separately so a slow weight drift doesn't get
+  swallowed by the AC eigenmodes.
+
+**Layer 2 — GMM+BIC clustering on coefficients (`src/litterbox/cluster_analyser.py`):**
+- Coefficient vectors from Layer 1 are clustered with a Gaussian Mixture
+  Model. Number of clusters k ∈ [1, `max_clusters`] is selected by BIC.
+- Each visit's log-likelihood under the fitted mixture is converted to a
+  z-score against the population. `z_score_thresholds`
+  (mild=-2, significant=-3, major=-4) classify outliers.
+- Cluster assignments and z-scores are written back to `eigen_waveforms`
+  (columns: `cluster_log_likelihood`, `cluster_z_score`, `cluster_assignment`,
+  `cluster_model_id`) via the migration in `db.py`.
+
+**Orchestration & queries:**
+- `src/litterbox/analyser_pipeline.py` — plugin-style runner that chains
+  resampling → eigenanalysis → clustering. Plugin-friendly so future analysers
+  can be added without touching the core.
+- `src/litterbox/eigen_query.py` — read-side helpers for HTML reports and
+  agent tools (per-cat summaries, anomaly lists, time-range filters).
+
+**Simulator integration:**
+- `simulator/run_eigen_simulation.py` and friends generate ground-truth
+  anomalies, run the full pipeline, and emit reports under
+  `simulator/eigen_sim_reports/` (gitignored).
+
+**Step 5 status: COMPLETE** — Layers 1 and 2 implemented; `uniform_n=4`
+calibrated. See `docs/USER_GUIDE.md` §12.10–12.15.
 
 ---
 
@@ -601,25 +684,36 @@ VisitAnalyser
 
 ```
 src/litterbox/
-├── td_config.json          # configuration (window, sample rate, channels, thresholds)
+├── td_config.json          # configuration (window, sample rate, channels, thresholds, eigen, cluster)
 ├── time_buffer.py          # Step 1 — RollingBuffer + load_td_config()
 ├── sensor_collector.py     # Step 2 — BaseDriver, all drivers, SensorCollector
 ├── visit_trigger.py        # Step 3 — VisitTrigger state machine
 ├── visit_analyser.py       # Step 4 — VisitAnalyser, TdVisitRecord
-└── image_retention.py      # Step 4 — visit image deletion sweep
+├── image_retention.py      # Step 4 — visit image deletion sweep
+├── eigen_analyser.py       # Step 5a — eigendecomposition / EV scoring (Layer 1)
+├── cluster_analyser.py     # Step 5c — GMM+BIC on coefficients (Layer 2)
+├── eigen_query.py          # Step 5  — read-side query helpers for reports/tools
+└── analyser_pipeline.py    # Step 5  — plugin orchestration (resample → eigen → cluster)
 
 tests/
 ├── test_time_buffer.py     # Step 1 tests
 ├── test_sensor_collector.py# Step 2 tests
 ├── test_visit_trigger.py   # Step 3 tests
-└── test_visit_analyser.py  # Step 4 tests
+├── test_visit_analyser.py  # Step 4 tests
+├── test_eigen_analyser.py  # Step 5a tests
+├── test_eigen_query.py     # Step 5b tests
+├── test_cluster_analyser.py# Step 5c tests
+└── test_analyser_pipeline.py # pipeline orchestration tests
 ```
 
 ### Time-Domain Module — Step Status Tracker
 
 | Step | Description | Status |
 |------|-------------|--------|
-| 1 | `RollingBuffer` + config loading | NOT STARTED |
-| 2 | `SensorCollector` + hardware driver interface | NOT STARTED |
-| 3 | `VisitTrigger` state machine | NOT STARTED |
-| 4 | `VisitAnalyser`, DB storage, image retention | NOT STARTED |
+| 1   | `RollingBuffer` + config loading | COMPLETE |
+| 2   | `SensorCollector` + hardware driver interface | COMPLETE |
+| 3   | `VisitTrigger` state machine | COMPLETE |
+| 4   | `VisitAnalyser`, DB storage, image retention | COMPLETE |
+| 5a  | Eigendecomposition / EV anomaly scoring (Layer 1) | COMPLETE |
+| 5b  | Query API + HTML report integration | COMPLETE |
+| 5c  | GMM+BIC cluster analysis on coefficients (Layer 2) | COMPLETE |

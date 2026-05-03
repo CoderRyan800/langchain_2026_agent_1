@@ -2,7 +2,7 @@ import base64
 import mimetypes
 import shutil
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple
 
@@ -203,7 +203,7 @@ def record_entry(
     if not src.exists():
         return f"Error: file not found: {image_path}"
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     date_str = now.strftime("%Y-%m-%d")
     dest_dir = IMAGES_DIR / "visits" / date_str
     filename = f"{uuid.uuid4().hex[:8]}_entry.jpg"
@@ -285,7 +285,7 @@ def record_exit(
     if not src.exists():
         return f"Error: file not found: {image_path}"
 
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     date_str = now.strftime("%Y-%m-%d")
     dest_dir = IMAGES_DIR / "visits" / date_str
     filename = f"{uuid.uuid4().hex[:8]}_exit.jpg"

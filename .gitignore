@@ -5,3 +5,20 @@ __pycache__/
 data/
 images/
 tests/test_data/
+
+# Build artifacts
+build/
+output/
+*.egg-info/
+
+# OS metadata
+.DS_Store
+
+# Simulator outputs (regenerated on each run)
+simulator/api_sim_data/
+simulator/api_sim_images/
+simulator/eigen_sim_reports/
+simulator/eigen_sim_ground_truth.json
+simulator/eigen_sim_summary.md
+simulator/sim_ground_truth.json
+simulator/simulation_report.md

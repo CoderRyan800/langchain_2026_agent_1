@@ -103,22 +103,29 @@ def _split_anomalous(rows: list, value_col: str) -> tuple[dict, dict]:
     return normal, anomalous
 
 
-def _gas_reference_lines(values: list[float]) -> Optional[tuple[float, float]]:
-    """Return (mild_threshold_ppb, significant_threshold_ppb) or ``None``.
+def _gas_threshold_levels(
+    values: list[float],
+) -> Optional[tuple[float, float, float]]:
+    """Return (median_ppb, mild_ppb, significant_ppb) or ``None``.
 
     Computes the same robust log-Gaussian fit the gas anomaly detector uses,
-    then back-projects ``median + 2σ`` and ``median + 3σ`` from log space
-    via ``expm1``. Returns ``None`` when there are too few points (or when
-    all values are constant).
+    then back-projects the location and the ``median ± kσ`` bands from log
+    space via ``expm1``. Returns ``None`` when the fit is degenerate (too
+    few points, or all values constant).
+
+    The median is the cat's "normal" anchor: a solid line on the plot
+    showing where the bulk of this cat's readings sit. The mild /
+    significant lines mark the alarm tiers.
     """
     clean = [v for v in values if v is not None]
     model = _fit_log_gaussian(clean)
     if model is None:
         return None
     median, sigma = model
+    median_ppb = math.expm1(median)
     mild = math.expm1(median + 2.0 * sigma)
     significant = math.expm1(median + 3.0 * sigma)
-    return mild, significant
+    return median_ppb, mild, significant
 
 
 def _build_panel(
@@ -128,8 +135,18 @@ def _build_panel(
     y_label: str,
     show_reference_lines: bool,
     shared_x_range,
+    log_y_axis: bool = False,
 ):
-    """Render one stacked panel for the given channel."""
+    """Render one stacked panel for the given channel.
+
+    Gas channels pass ``log_y_axis=True`` and ``show_reference_lines=True``.
+    The detector works in ``log1p`` space, so a log y-axis matches the
+    geometry the model actually sees: median and the alarm tiers become
+    roughly evenly spaced bands rather than getting squashed against the
+    bottom by an order-of-magnitude alarm threshold. A solid green line
+    at the median anchors the cat's "normal" position; orange / red
+    dashed lines mark the mild / significant alarm tiers.
+    """
     normal, anomalous = _split_anomalous(rows, value_col)
 
     fig_kwargs: dict = dict(
@@ -141,22 +158,31 @@ def _build_panel(
     )
     if shared_x_range is not None:
         fig_kwargs["x_range"] = shared_x_range
+    if log_y_axis:
+        fig_kwargs["y_axis_type"] = "log"
     p = figure(**fig_kwargs)
     p.yaxis.axis_label = y_label
 
     # Reference lines (only on gas channels with enough history).
     if show_reference_lines:
         all_values = [r[value_col] for r in rows if r[value_col] is not None]
-        thresholds = _gas_reference_lines(all_values)
-        if thresholds is not None:
-            mild, significant = thresholds
+        levels = _gas_threshold_levels(all_values)
+        if levels is not None:
+            median_ppb, mild_ppb, significant_ppb = levels
+            # Median: solid green, anchors the cat's "normal" position.
             p.add_layout(Span(
-                location=mild, dimension="width",
+                location=median_ppb, dimension="width",
+                line_color="#2ca02c", line_alpha=0.55, line_width=1,
+            ))
+            # Mild alarm threshold (z=2): orange dashed.
+            p.add_layout(Span(
+                location=mild_ppb, dimension="width",
                 line_color="#ff8c00", line_dash="dashed", line_alpha=0.6,
                 line_width=1,
             ))
+            # Significant alarm threshold (z=3): red dashed.
             p.add_layout(Span(
-                location=significant, dimension="width",
+                location=significant_ppb, dimension="width",
                 line_color="#d62728", line_dash="dashed", line_alpha=0.7,
                 line_width=1,
             ))
@@ -259,17 +285,19 @@ def plot_cat_history(
     )
     nh3_panel = _build_panel(
         rows, "ammonia_peak_ppb",
-        title="NH₃ peak (ppb) — dashed lines: med+2σ (mild), med+3σ (significant)",
-        y_label="NH₃ ppb",
+        title="NH₃ peak (ppb, log scale) — green: median, orange: mild (z=2), red: significant (z=3)",
+        y_label="NH₃ ppb (log)",
         show_reference_lines=True,
         shared_x_range=weight_panel.x_range,
+        log_y_axis=True,
     )
     ch4_panel = _build_panel(
         rows, "methane_peak_ppb",
-        title="CH₄ peak (ppb) — dashed lines: med+2σ (mild), med+3σ (significant)",
-        y_label="CH₄ ppb",
+        title="CH₄ peak (ppb, log scale) — green: median, orange: mild (z=2), red: significant (z=3)",
+        y_label="CH₄ ppb (log)",
         show_reference_lines=True,
         shared_x_range=weight_panel.x_range,
+        log_y_axis=True,
     )
 
     if output_path is None:

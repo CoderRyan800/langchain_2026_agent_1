@@ -267,6 +267,47 @@ You: Show me all flagged health events
 You: Are there any anomalous visits this month?
 ```
 
+The list view shows a one-line gas-anomaly summary per row (`tier=severe,
+NH₃ z=+1.08, CH₄ z=+6.11, n=32, model=per_cat`) plus a snippet of the
+GPT-4o health notes — enough to triage.
+
+### Specific visit details
+
+When you want the full report for one visit (sensor readings, gas-anomaly
+score, GPT-4o health text, image paths, all in one place):
+
+```
+You: Explain visit 115
+You: Why was visit 70 flagged?
+You: What were the readings on visit 42?
+```
+
+The agent uses `get_visit_details(visit_id)` for these. The reply includes
+the cat's identity (with confirmation status and CLIP similarity), all
+weight and gas readings, the data-driven gas anomaly block (tier, signed
+z-scores, sample count, model used — `per_cat` / `pooled` / `insufficient_data`),
+the GPT-4o health analysis, and image paths.
+
+### History plots
+
+```
+You: Show me a chart of Anna's history
+You: Plot the last 30 days for Whiskers
+```
+
+Generates a self-contained HTML file with three stacked time-series
+sub-plots: cat weight (linear), NH₃ peak (log scale), and CH₄ peak (log
+scale). Anomalous visits are red ✕ markers; normal visits are blue dots.
+Hover any point for visit ID, raw reading, z-score, tier, and model.
+A solid green line marks the cat's robust median; orange and red dashed
+lines mark the mild (z=2σ) and significant (z=3σ) alarm thresholds —
+back-projected from log space to ppb so you can see how close the data
+is to alarming. The HTML opens in any browser without an internet
+connection (Bokeh JavaScript is inlined).
+
+Default window is 90 days; specify `days` in natural language to override.
+Output writes to `output/cat_history_<name>.html`.
+
 ### Images
 
 ```
@@ -728,6 +769,16 @@ gas detector below has flagged a tier, that tier is also passed in so the
 LLM's `DESCRIPTION` and `OWNER_SUMMARY` can ground the explanation in the
 statistical anomaly rather than guessing from raw numbers.
 
+The prompt opens with explicit anti-refusal language: it tells the model
+the images contain no people, no faces, and no identifiable individuals,
+and that any pareidolic shapes in the litter are litter material, not
+faces. This suppresses OpenAI's content classifier from refusing on
+litter shadows or clumps. When a refusal still happens — or any other
+unstructured response — `health_notes` stores a clean placeholder
+(`"Health analysis unavailable — GPT-4o did not return a structured
+response..."`) instead of the refusal text, and points the reader at
+the gas-anomaly columns for the data-driven verdict.
+
 **2. Data-driven gas anomaly detector.** Per-cat statistical check on the
 NH₃ and CH₄ peak readings. The detector judges each visit relative to the
 cat's *own* history — there are no fixed ppb thresholds, because absolute
@@ -795,6 +846,40 @@ print(agent.get_anomalous_visits())     # Python API
 
 If a visit is flagged as anomalous, or if you observe any change in your cat's
 behaviour or litter box habits, consult a licensed veterinarian promptly.
+
+### Rescoring historical visits
+
+The `is_anomalous` flag and the `gas_anomaly_*` columns are written exactly
+once at the moment a visit's exit is recorded. The system never recomputes
+these for old visits during normal operation. So if the detector logic
+changes — a new threshold, a new statistical estimator, a new prompt —
+older visits keep the verdict that was true at the time they were scored.
+Reports and plots that span dates can show the same physical readings with
+different verdicts purely because they were processed by different detector
+versions.
+
+To bring a database to a single consistent verdict policy under the
+*current* detector, run:
+
+```bash
+python -m litterbox.rescore --dry-run    # preview what would change
+python -m litterbox.rescore              # apply the changes
+```
+
+Mechanics:
+- For each visit with at least one non-null gas reading, the rescorer
+  re-runs `score_gas_visit` against the current `visits` table (excluding
+  the visit itself from the fit, same as the live detector).
+- The LLM-side verdict is recovered from `health_notes`: `CONCERNS_PRESENT:
+  yes` → True; refusal text or the placeholder → False.
+- Final `is_anomalous = LLM_yes OR (gas_tier in {mild, significant, severe})`
+  — exactly what `record_exit` computes today.
+- The `gas_anomaly_rescored_at` column is set on every changed row so the
+  migration is auditable.
+
+The utility is idempotent. `--dry-run` writes nothing — it only reports
+what *would* change. The `--show N` flag controls how many sample changes
+are printed.
 
 ---
 
@@ -904,6 +989,7 @@ CREATE TABLE visits (
     gas_anomaly_tier       TEXT,       -- normal | mild | significant | severe | insufficient_data
     gas_anomaly_n_samples  INTEGER,    -- size of the historical fit
     gas_anomaly_model_used TEXT,       -- per_cat | pooled | insufficient_data
+    gas_anomaly_rescored_at TIMESTAMP, -- set by python -m litterbox.rescore (NULL otherwise)
     created_at        TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```

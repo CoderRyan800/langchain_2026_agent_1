@@ -159,15 +159,19 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │   └── litterbox/
 │       ├── db.py                # SQLite schema and query helpers
 │       ├── embeddings.py        # Local CLIP embeddings + Chroma vector search
-│       ├── health.py            # GPT-4o health analysis prompt and parser
+│       ├── health.py            # GPT-4o health prompt, parser, refusal sanitiser
 │       ├── gas_anomaly.py       # Per-cat data-driven NH₃/CH₄ detector (median + MAD)
-│       └── tools.py             # All 11 LangChain tools (record_entry/exit accept sensor data)
+│       ├── history_plot.py      # Per-cat Bokeh history plots (weight, NH₃, CH₄)
+│       ├── rescore.py           # Re-score historical visits against current detector
+│       └── tools.py             # All 13 LangChain tools (record_entry/exit + queries + plots)
 ├── tests/
 │   ├── run_manual_test.py       # Manual integration test runner (8 phases, 80+ checks)
 │   ├── conftest.py              # Shared pytest fixtures and isolation helpers
 │   ├── test_db.py               # Schema, migration, and constraint tests
-│   ├── test_health.py           # Health prompt builder and response parser tests
+│   ├── test_health.py           # Health prompt builder, parser, refusal sanitiser
 │   ├── test_gas_anomaly.py      # Per-cat data-driven gas anomaly detector tests
+│   ├── test_history_plot.py     # Per-cat Bokeh history plot tests
+│   ├── test_rescore.py          # Rescore-historical-visits utility tests
 │   ├── test_tools_core.py       # Query and management tool tests
 │   ├── test_tools_sensor.py     # record_entry / record_exit sensor tests
 │   ├── test_integration.py      # Full visit lifecycle integration tests

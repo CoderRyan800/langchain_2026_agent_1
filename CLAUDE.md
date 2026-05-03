@@ -55,14 +55,14 @@ python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 529 tests, ~20 s
+pytest -m "not slow"    # 585 tests, ~22 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 549 tests
+pytest                  # all 605 tests
 ```
 
 Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
 
-Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser), `test_tools_core.py` (query tools), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector).
+Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser/refusal sanitiser), `test_tools_core.py` (query tools incl. `get_visit_details`), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector), `test_history_plot.py` (per-cat Bokeh history plots), `test_rescore.py` (rescoring utility).
 
 ## Architecture
 
@@ -76,9 +76,11 @@ Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt bui
 - Memory: `data/agent_litterbox_memory.db`; thread IDs `"sensor"` vs `"interactive"` maintain separate histories
 - **`src/litterbox/db.py`** — SQLite schema (cats, cat_images, visits, visit_sensor_events); `init_db()` is idempotent with automatic migration for old DBs missing sensor columns
 - **`src/litterbox/embeddings.py`** — CLIP (`clip-ViT-B-32`, downloads ~350 MB on first run) + Chroma vector search; `ID_THRESHOLD = 0.82`
-- **`src/litterbox/health.py`** — `build_health_prompt(**sensor_kwargs)` assembles the GPT-4o prompt with optional sensor readings and (when an alarm tier is provided) a "Statistical sensor anomaly detector output" block grounded in the cat's own history; `HEALTH_PROMPT` constant preserved for backward compatibility; `parse_health_response()` unchanged
+- **`src/litterbox/health.py`** — `build_health_prompt(**sensor_kwargs)` assembles the GPT-4o prompt with optional sensor readings and (when an alarm tier is provided) a "Statistical sensor anomaly detector output" block grounded in the cat's own history. The preamble includes anti-refusal language ("no people, no faces, no humans... pareidolic shapes are litter material") to suppress OpenAI content-policy false positives on litter pareidolia. `parse_health_response()` parses `CONCERNS_PRESENT` into a bool. `safe_health_notes()` is the storage-side sanitiser: when the LLM didn't return a structured response (refusal, malformed), it substitutes a clean placeholder pointing the reader at the gas-anomaly columns rather than persisting the refusal text. `HEALTH_PROMPT` constant preserved for backward compatibility.
 - **`src/litterbox/gas_anomaly.py`** — Data-driven per-cat NH₃/CH₄ detector. Median + MAD-based sigma on `log1p`-transformed peak readings, signed z-scores, alarm only on the high tail, tier ∈ {`normal`, `mild`≥2σ, `significant`≥3σ, `severe`≥5σ, `insufficient_data`}. Fits on demand from the `visits` table — no separate persisted model. Per-cat fit when ≥`min_visits_per_cat` non-null readings, else pooled fallback at ≥`min_visits_pooled`, else `insufficient_data`. Excludes the current visit_id from its own fit. Robust statistics (50% breakdown point) so historical contamination by prior anomalies doesn't suppress new ones.
-- **`src/litterbox/tools.py`** — 11 `@tool` functions; docstrings auto-generate LangChain tool descriptions
+- **`src/litterbox/history_plot.py`** — Per-cat Bokeh HTML report. Three stacked sub-plots (linked time axis): cat weight (linear y), NH₃ peak and CH₄ peak (log y, since the detector works in log-space). Anomalous visits are red ✕ markers; normal visits are blue dots. Hover tooltips show visit ID, raw reading, signed z-score, tier, and which model produced the score. Solid green reference line at the cat's robust median; orange/red dashed lines at the mild/significant alarm thresholds back-projected from log space. Default 90-day window. Output writes to `output/cat_history_<name>.html` (gitignored).
+- **`src/litterbox/rescore.py`** — One-shot maintenance utility that re-derives every visit's gas-anomaly columns and `is_anomalous` flag against the *current* detector. The `is_anomalous` column is written once at `record_exit` time and never updated by live operation, so visits scored under older detector versions keep stale verdicts. The rescorer fixes the dataset to a single consistent verdict policy: `is_anomalous = LLM_yes_recovered_from_health_notes OR (gas_tier in ALARM_TIERS)`. Idempotent. Stamps `gas_anomaly_rescored_at` on changed rows. Library function `rescore_all_visits(conn, dry_run)` plus `python -m litterbox.rescore [--dry-run]` CLI.
+- **`src/litterbox/tools.py`** — 13 `@tool` functions; docstrings auto-generate LangChain tool descriptions. Per-visit detail (`get_visit_details(visit_id)`) and history-plot generation (`plot_cat_history(cat_name, days=90)`) supplement the existing list-style query tools so the agent can answer specific "explain visit N" and "show me a chart" questions.
 
 ### Two-Stage Cat ID Pipeline
 1. **CLIP** (local, free): embeds entry image, queries Chroma for top candidates
@@ -89,7 +91,7 @@ If no candidate passes both stages, the visit is recorded unconfirmed for human 
 ### Sensor Data Ingestion
 Each visit can capture readings from a weight scale and gas sensors. Data flows two ways:
 
-- **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings); plus the gas-anomaly score persisted by `record_exit`: `ammonia_z_score`, `methane_z_score`, `gas_anomaly_tier`, `gas_anomaly_n_samples`, `gas_anomaly_model_used` (`per_cat`, `pooled`, or `insufficient_data`).
+- **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings); plus the gas-anomaly score persisted by `record_exit` (and rewritten by `rescore.py`): `ammonia_z_score`, `methane_z_score`, `gas_anomaly_tier`, `gas_anomaly_n_samples`, `gas_anomaly_model_used` (`per_cat`, `pooled`, or `insufficient_data`), and `gas_anomaly_rescored_at` (set only when `rescore.py` updates the row).
 - **Time-series log in `visit_sensor_events`**: one row per reading with `phase` (pre_entry / entry / exit), `sensor_type`, `value_numeric`, and `unit`
 
 CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`. All are optional — omit any that are unavailable or malfunctioning. The flags are serialised into the sensor event prompt string; the LLM extracts the named values and passes them to the tool. See `docs/USER_GUIDE.md` §6 for full CLI examples and derivation rules.
@@ -97,10 +99,20 @@ CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-p
 ### Health Analysis
 `record_exit()` runs two parallel checks and ORs their verdicts into `visits.is_anomalous`:
 
-1. **GPT-4o visual analysis.** Entry+exit images plus any sensor readings are sent to GPT-4o; response stored in `visits.health_notes`. Always includes a mandatory veterinary disclaimer.
+1. **GPT-4o visual analysis.** Entry+exit images plus any sensor readings are sent to GPT-4o. The prompt opens with anti-refusal language clarifying no people/faces/humans are in any image (the OpenAI content classifier sometimes interprets litter pareidolia as faces). The structured response is parsed for `CONCERNS_PRESENT: yes|no`. When the response *isn't* structured (refusal, malformed reply), `safe_health_notes` writes a clean placeholder to `visits.health_notes` instead of persisting the refusal text, and the `is_anomalous` LLM-side defaults to False. Response always includes a mandatory veterinary disclaimer.
 2. **Data-driven gas anomaly score** (`gas_anomaly.py`). NH₃ and CH₄ peak readings are scored as signed z-scores against a per-cat (or pooled-fallback) robust log-Gaussian fit. The tier is injected into the LLM prompt as a "Statistical sensor anomaly detector output" block grounded in the cat's own history (not raw ppb thresholds — absolute gas readings are deployment-dependent and have no portable meaning). Tiers ∈ {`mild`, `significant`, `severe`} flip `is_anomalous` regardless of the LLM verdict. Z-scores and tier are persisted on the visit row for SQL queries and reports.
 
 Configuration lives in `td_config.json` under `gas_anomaly` (`min_visits_per_cat`, `min_visits_pooled`, `z_score_thresholds`).
+
+### Maintenance — Rescoring historical visits
+The `is_anomalous` flag and the `gas_anomaly_*` columns are written once at `record_exit` time and never recomputed by live operation. As the detector evolves, older visits keep stale verdicts. To bring a database to a consistent verdict policy under the *current* detector, run:
+
+```bash
+python -m litterbox.rescore --dry-run    # preview
+python -m litterbox.rescore              # apply
+```
+
+The rescorer recovers each row's LLM verdict by re-parsing `health_notes` (where it followed the format) and re-scores the gas-anomaly columns using `score_gas_visit` with the same `exclude_visit_id` logic the live detector uses. Final `is_anomalous = LLM_yes OR (gas_tier in ALARM_TIERS)`. Idempotent — safe to run multiple times. Sets `gas_anomaly_rescored_at` on rows it changes so the migration is auditable.
 
 ### Runtime Data (gitignored)
 - `data/litterbox.db` — SQLite metadata

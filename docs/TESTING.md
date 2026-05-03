@@ -264,11 +264,13 @@ entirely offline and complete in about 12 seconds.
 | `tests/test_cluster_analyser.py` | 5c | GMM+BIC clustering on expansion coefficients | 15 |
 | `tests/test_analyser_pipeline.py` | 5  | Plugin orchestration (resample → eigen → cluster) | 24 |
 | `tests/test_gas_anomaly.py` | —  | Data-driven NH₃/CH₄ detector (median + MAD on log-readings) | 35 |
-| **Step subtotal** | | | **261** |
+| `tests/test_history_plot.py` | —  | Per-cat Bokeh history plot module + tool wrapper | 27 |
+| `tests/test_rescore.py` | —  | Rescore historical visits against current detector | 14 |
+| **Subtotal** | | | **302** |
 
 The full pytest suite (this table plus the legacy non-time-domain tests
 under `test_db.py`, `test_health.py`, `test_tools_*.py`, `test_integration.py`,
-`test_api.py`) currently runs **529 non-slow tests** in about 20 s. Add
+`test_api.py`) currently runs **585 non-slow tests** in about 22 s. Add
 `pytest -m slow` for an additional 20 CLIP-embedding tests (model download
 on first run).
 

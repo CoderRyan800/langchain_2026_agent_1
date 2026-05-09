@@ -27,7 +27,9 @@ sys.path.insert(0, str(Path(__file__).parent))
 from litterbox.db import init_db          # noqa: E402
 from litterbox.tools import ALL_TOOLS     # noqa: E402
 
-load_dotenv()
+# override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins over
+# any conflicting values inherited from the parent shell.
+load_dotenv(override=True)
 init_db()
 
 PROJECT_ROOT = Path(__file__).parent.parent

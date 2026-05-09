@@ -128,7 +128,9 @@ class LitterboxAgent:
         images_dir: Optional[str] = None,
         openai_api_key: Optional[str] = None,
     ) -> None:
-        load_dotenv()
+        # override=True so the project .env (e.g. LANGSMITH_TRACING=false)
+        # wins over any conflicting values inherited from the parent shell.
+        load_dotenv(override=True)
 
         if openai_api_key:
             import os

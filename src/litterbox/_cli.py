@@ -10,7 +10,9 @@ def main():
     from dotenv import load_dotenv
     from langgraph.checkpoint.sqlite import SqliteSaver
 
-    load_dotenv()
+    # override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins
+    # over any conflicting values inherited from the parent shell.
+    load_dotenv(override=True)
 
     parser = argparse.ArgumentParser(description="Litter box monitoring agent")
     parser.add_argument("--event", choices=["entry", "exit"],

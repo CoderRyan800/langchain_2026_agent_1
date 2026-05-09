@@ -520,7 +520,13 @@ def get_visits_by_date(date_str: str) -> str:
 
 @tool
 def get_visits_by_cat(cat_name: str) -> str:
-    """List all visits for a cat, by confirmed or tentative name.
+    """List all visits for a cat as a Markdown table including weights, gas
+    readings, gas-anomaly tier, and the anomaly flag.
+
+    Use this tool whenever the user asks for a table, list, or history of one
+    cat's visits — it already returns every per-visit field the user is likely
+    to want, so there is no need to chain into get_visit_details unless they
+    ask about a single specific visit.
 
     cat_name: the cat's registered name.
     """
@@ -534,7 +540,11 @@ def get_visits_by_cat(cat_name: str) -> str:
 
         rows = conn.execute(
             """SELECT v.visit_id, v.entry_time, v.exit_time,
-                      v.is_confirmed, v.is_anomalous, v.similarity_score
+                      v.is_confirmed, v.is_anomalous, v.similarity_score,
+                      v.cat_weight_g, v.waste_weight_g,
+                      v.ammonia_peak_ppb, v.methane_peak_ppb,
+                      v.ammonia_z_score, v.methane_z_score,
+                      v.gas_anomaly_tier
                FROM visits v
                WHERE v.confirmed_cat_id = ?
                   OR (v.tentative_cat_id = ? AND v.is_confirmed = FALSE)
@@ -545,14 +555,34 @@ def get_visits_by_cat(cat_name: str) -> str:
     if not rows:
         return f"No visits found for '{cat_name}'."
 
-    lines = [f"Visits for '{cat_name}' ({len(rows)} total):"]
+    def _f(v, fmt):
+        return format(v, fmt) if v is not None else "—"
+
+    header = (
+        "| Visit | Entry time | Exit time | ID | Anomaly | Cat wt (g) | "
+        "Waste (g) | NH₃ ppb | NH₃ z | CH₄ ppb | CH₄ z | Gas tier |"
+    )
+    sep = "|" + "|".join(["---"] * 12) + "|"
+    lines = [f"Visits for '{cat_name}' ({len(rows)} total):", "", header, sep]
     for r in rows:
-        status = "confirmed" if r["is_confirmed"] else "tentative"
-        anomaly = " ⚠️" if r["is_anomalous"] else ""
-        score = f" sim={r['similarity_score']:.2f}" if r["similarity_score"] else ""
+        id_status = "confirmed" if r["is_confirmed"] else "tentative"
+        anomaly = "⚠️ yes" if r["is_anomalous"] else "no"
         lines.append(
-            f"  #{r['visit_id']} [{status}]{anomaly}{score} | "
-            f"{r['entry_time']} → {r['exit_time'] or 'open'}"
+            "| #{vid} | {entry} | {exit_} | {id_} | {an} | {cw} | {ww} | "
+            "{nh3} | {nh3z} | {ch4} | {ch4z} | {tier} |".format(
+                vid=r["visit_id"],
+                entry=(r["entry_time"] or "—")[:19],
+                exit_=(r["exit_time"] or "open")[:19],
+                id_=id_status,
+                an=anomaly,
+                cw=_f(r["cat_weight_g"], ".0f"),
+                ww=_f(r["waste_weight_g"], ".0f"),
+                nh3=_f(r["ammonia_peak_ppb"], ".1f"),
+                nh3z=_f(r["ammonia_z_score"], "+.2f"),
+                ch4=_f(r["methane_peak_ppb"], ".1f"),
+                ch4z=_f(r["methane_z_score"], "+.2f"),
+                tier=r["gas_anomaly_tier"] or "—",
+            )
         )
     return "\n".join(lines)
 

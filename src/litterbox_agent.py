@@ -74,7 +74,12 @@ Your responsibilities:
      fall back to get_anomalous_visits or get_visits_by_cat for these.
    - "List anomalous visits", "show me flagged visits" → get_anomalous_visits.
    - "Visits on date X" → get_visits_by_date.
-   - "Show me Cat's visits" / "history for Cat" (text list) → get_visits_by_cat.
+   - "Show me Cat's visits" / "history for Cat" / "table of Cat's visits" /
+     "Cat's visits with weights and gas readings" → get_visits_by_cat.
+     This already returns a Markdown table containing weights, NH₃/CH₄ peaks,
+     z-scores, gas-anomaly tier, and the anomaly flag. Do NOT loop over
+     get_visit_details to assemble the same table — get_visits_by_cat is the
+     bulk view; get_visit_details is for one specific visit.
    - "Plot / chart / graph / trend / visualisation of Cat" → plot_cat_history;
      return the file path so the user can open the HTML in a browser.
    - "Eigenanalysis report for Cat" → eigen_report.
@@ -103,12 +108,32 @@ Important rules:
 
 
 def _print_last_ai_message(response: dict) -> None:
-    """Print the final AI message and any tool outputs from the response."""
-    for message in response["messages"]:
-        if isinstance(message, ToolMessage):
-            print(f"  [tool result] {message.content}\n")
-        elif isinstance(message, AIMessage) and message.content:
-            print(f"Assistant: {message.content}\n")
+    """Print tool results from this turn and the agent's final reply.
+
+    ``response["messages"]`` is the entire thread (loaded state + this
+    turn's new messages), so we walk it backwards: print the last
+    AIMessage with content (the actual reply), then print any
+    ToolMessages that came after the last user message (this turn's
+    tool calls). Anything older is prior history and must not be
+    re-echoed each turn.
+    """
+    messages = response["messages"]
+
+    # Find the most recent HumanMessage; everything after it belongs to this turn.
+    turn_start = 0
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            turn_start = i + 1
+            break
+
+    for msg in messages[turn_start:]:
+        if isinstance(msg, ToolMessage):
+            print(f"  [tool result] {msg.content}\n")
+
+    for msg in reversed(messages[turn_start:]):
+        if isinstance(msg, AIMessage) and msg.content:
+            print(f"Assistant: {msg.content}\n")
+            return
 
 
 def run_sensor_event(
@@ -189,11 +214,18 @@ def run_interactive(checkpointer) -> None:
             )
         ],
     )
-    config = {"configurable": {"thread_id": "interactive"}}
+    # New thread per process so a stale, summarised history from a prior
+    # session can't poison the model into responding to "ghost context".
+    # Resume an old conversation by setting the LITTERBOX_THREAD env var.
+    import os, time
+    thread_id = os.environ.get("LITTERBOX_THREAD") or f"interactive-{int(time.time())}"
+    config = {"configurable": {"thread_id": thread_id}}
 
     print("Litter Box Agent ready.")
+    print(f"Thread: {thread_id}")
     print("Commands:")
     print("  /UPLOAD <filepath>  — register a reference photo for a cat")
+    print("  /NEW                — start a fresh conversation thread")
     print("  /STOP               — quit\n")
 
     while True:
@@ -209,6 +241,12 @@ def run_interactive(checkpointer) -> None:
         if user_input == "/STOP":
             print("Goodbye!")
             break
+
+        if user_input == "/NEW":
+            thread_id = f"interactive-{int(time.time())}"
+            config = {"configurable": {"thread_id": thread_id}}
+            print(f"Started fresh thread: {thread_id}\n")
+            continue
 
         if user_input.startswith("/UPLOAD "):
             file_path = user_input[len("/UPLOAD "):].strip()

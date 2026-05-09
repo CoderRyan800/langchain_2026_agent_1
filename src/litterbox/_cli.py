@@ -37,11 +37,22 @@ def main():
     )
 
     def _print_response(response):
-        for msg in response["messages"]:
+        # Print only this turn's tool calls and the final assistant reply.
+        # response["messages"] is the entire thread, so anything before the
+        # last HumanMessage is prior history and must not be re-echoed.
+        messages = response["messages"]
+        turn_start = 0
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], HumanMessage):
+                turn_start = i + 1
+                break
+        for msg in messages[turn_start:]:
             if isinstance(msg, ToolMessage):
                 print(f"  [tool result] {msg.content}\n")
-            elif isinstance(msg, AIMessage) and msg.content:
+        for msg in reversed(messages[turn_start:]):
+            if isinstance(msg, AIMessage) and msg.content:
                 print(f"Assistant: {msg.content}\n")
+                return
 
     if args.event:
         if not args.image:

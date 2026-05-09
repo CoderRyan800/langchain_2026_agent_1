@@ -998,6 +998,100 @@ def eigen_report(cat_name: str) -> str:
     return "\n".join(lines)
 
 
+@tool
+def get_trend_summary(cat_name: str, days_recent: int = 14, days_baseline: int = 75) -> str:
+    """Long-term trend report for one cat across body weight, waste output,
+    and gas peaks (NH₃, CH₄).
+
+    Use this whenever the user asks about long-term changes — weight loss /
+    weight gain, gradual gas elevation, less waste than usual, possible
+    constipation, "is Luna trending differently lately", etc. The per-visit
+    detectors (gas anomaly, eigen, cluster) deliberately miss slow drifts;
+    this tool fills that gap.
+
+    Compares the recent window (last `days_recent` days) against the prior
+    `days_baseline` days as the baseline. Each channel gets a tier in
+    {normal, mild, significant, severe, insufficient_data}. The weight channel
+    additionally applies clinical % thresholds (5/10/15%); the worse of the
+    z-based and pct-based tier wins. Waste alarms only on the low side under
+    a constipation rule (high no-waste rate AND low recent mean waste). NH₃
+    and CH₄ alarm only on the high side.
+
+    cat_name:      registered cat's name.
+    days_recent:   recent-window length in days (default 14).
+    days_baseline: baseline-window length in days, immediately prior (default 75).
+    """
+    from litterbox.trend_anomaly import score_trends
+
+    init_db()
+    with get_conn() as conn:
+        cat = conn.execute(
+            "SELECT cat_id FROM cats WHERE name = ?", (cat_name,)
+        ).fetchone()
+        if not cat:
+            return f"No cat named '{cat_name}' found in the database."
+        result = score_trends(
+            conn, cat_id=cat["cat_id"],
+            days_recent=days_recent, days_baseline=days_baseline,
+        )
+
+    lines = [
+        f"Trend report for '{cat_name}'  (overall: {result['overall_tier']})",
+        f"  Recent   ({days_recent}d):  {result['recent_window']['n_visits']} visits",
+        f"  Baseline ({days_baseline}d): {result['baseline_window']['n_visits']} visits",
+        "",
+    ]
+
+    if result["overall_tier"] == "insufficient_data":
+        lines.append(
+            f"  Not enough data yet — need ≥{result['min_visits_recent']} recent and "
+            f"≥{result['min_visits_baseline']} baseline visits."
+        )
+        return "\n".join(lines)
+
+    label = {
+        "cat_weight_g":     ("Body weight",   "g"),
+        "waste_weight_g":   ("Waste output",  "g"),
+        "ammonia_peak_ppb": ("NH₃ peak",      "ppb"),
+        "methane_peak_ppb": ("CH₄ peak",      "ppb"),
+    }
+    icon = {"normal": "✓", "mild": "⚠", "significant": "⚠⚠", "severe": "🚨",
+            "insufficient_data": "·"}
+
+    for col, info in result["channels"].items():
+        name, unit = label[col]
+        tier = info["tier"]
+        marker = icon.get(tier, "·")
+        if tier == "insufficient_data":
+            lines.append(f"  {marker} {name}: insufficient data")
+            continue
+        r, b = info["recent"], info["baseline"]
+        z = info["z_score"]
+        line = (
+            f"  {marker} {name} [{tier}]:  "
+            f"recent {r['mean']:.1f} {unit} (n={r['n']}, range {r['min']:.0f}-{r['max']:.0f})  "
+            f"vs baseline {b['mean']:.1f} {unit} (n={b['n']}, range {b['min']:.0f}-{b['max']:.0f})  "
+            f"z={z:+.2f}"
+        )
+        if "pct_change" in info:
+            line += f"  pct={info['pct_change']*100:+.1f}%"
+        lines.append(line)
+
+        if "constipation" in info and info["constipation"]["flagged"]:
+            c = info["constipation"]
+            lines.append(
+                f"     ↳ Constipation pattern: "
+                f"recent no-waste rate {c['recent_no_waste_rate']*100:.0f}% "
+                f"vs baseline {c['baseline_no_waste_rate']*100:.0f}%  "
+                f"(ratio {c['ratio']:.1f}×)"
+            )
+
+    if result["overall_tier"] in ("significant", "severe"):
+        lines.append("")
+        lines.append("  ⚠️  Recommend veterinary review — long-term shift detected.")
+    return "\n".join(lines)
+
+
 ALL_TOOLS = [
     register_cat_image,
     record_entry,
@@ -1013,4 +1107,5 @@ ALL_TOOLS = [
     list_cats,
     plot_cat_history,
     eigen_report,
+    get_trend_summary,
 ]

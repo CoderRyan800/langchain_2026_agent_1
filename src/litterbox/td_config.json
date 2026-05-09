@@ -89,5 +89,33 @@
       "major": -4.0
     },
     "_comment": "GMM+BIC cluster analysis on expansion coefficients. min_samples_for_clustering: minimum scored waveforms before clustering activates. min_samples_per_cluster: minimum points per GMM component (guards against under-determined covariance). max_clusters: upper bound for k in BIC sweep. n_init: number of EM restarts per GMM fit. z_score_thresholds: log-likelihood z-score cutoffs for anomaly levels."
+  },
+
+  "trend_anomaly": {
+    "days_recent":           14,
+    "days_baseline":         75,
+    "min_visits_recent":      5,
+    "min_visits_baseline":   10,
+
+    "z_score_thresholds": {
+      "mild":         2.0,
+      "significant":  3.0,
+      "severe":       5.0
+    },
+
+    "weight_pct_thresholds": {
+      "mild":         0.05,
+      "significant":  0.10,
+      "severe":       0.15
+    },
+
+    "constipation": {
+      "no_waste_g_cutoff":         5.0,
+      "min_no_waste_rate":         0.50,
+      "min_no_waste_ratio":        2.0,
+      "min_waste_z_score":        -2.0
+    },
+
+    "_comment": "Long-term trend detector. Computes recent (last days_recent days) vs baseline (the days_baseline days before that) per-cat statistics for cat_weight_g, waste_weight_g, ammonia_peak_ppb, methane_peak_ppb. Each channel gets a mean-shift z-score (Welch-style with MAD-σ) and a tier from z_score_thresholds. weight_pct_thresholds add an absolute body-weight % overlay on the weight channel; the worse of the two tiers wins. NH3 and CH4 alarm only on the high side (z > 0). Waste alarms only on the low side AND under the constipation rule: recent no-waste-rate (visits with waste < no_waste_g_cutoff) >= min_no_waste_rate AND recent rate >= min_no_waste_ratio * baseline rate AND recent waste z-score <= min_waste_z_score. min_visits_recent / min_visits_baseline gate when the detector is allowed to fire."
   }
 }

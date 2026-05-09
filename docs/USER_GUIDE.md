@@ -665,7 +665,7 @@ print(agent.get_visit_images(7))
 response: str = agent.query(message: str, thread_id: str = "api")
 ```
 
-Sends any plain-English message to the full LangGraph agent (all 14 tools,
+Sends any plain-English message to the full LangGraph agent (all 15 tools,
 conversation history preserved within `thread_id`). Uses GPT-4o for every
 call — use the structured methods above when cost matters.
 

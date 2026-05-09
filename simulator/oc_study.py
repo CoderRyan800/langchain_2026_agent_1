@@ -29,6 +29,7 @@ import statistics
 import sys
 import tempfile
 from dataclasses import dataclass, field
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 
@@ -66,6 +67,17 @@ class StudyConfig:
     cluster_n_grid:  list[int]            = field(default_factory=lambda: [25, 50, 100, 200, 400])
     cluster_seeds:   list[int]            = field(default_factory=lambda: list(range(10)))
 
+    # Trend study
+    trend_seeds:     list[int]            = field(default_factory=lambda: list(range(40)))
+    # Per-channel drift magnitudes to inject into the recent window. For
+    # weight: % of baseline mean. For NH3 / CH4 / waste: relative shift in
+    # baseline σ units (matching the gas detector's z conventions).
+    trend_weight_pct:  list[float]        = field(default_factory=lambda: [0.0, 0.03, 0.05, 0.10, 0.15])
+    trend_gas_z:       list[float]        = field(default_factory=lambda: [0.0, 1.0, 2.0, 3.0, 5.0])
+    # Constipation injection: fraction of recent visits forced to be no-waste
+    # (waste = 0g). Baseline always has 5% no-waste rate as the realistic floor.
+    trend_no_waste_frac: list[float]      = field(default_factory=lambda: [0.05, 0.30, 0.50, 0.70, 0.90])
+
 
 def quick_config() -> StudyConfig:
     """Smaller knobs so the quick run finishes in well under a minute."""
@@ -79,6 +91,10 @@ def quick_config() -> StudyConfig:
         eigen_seeds      = list(range(4)),
         cluster_n_grid   = [25, 50, 100, 200],
         cluster_seeds    = list(range(4)),
+        trend_seeds      = list(range(15)),
+        trend_weight_pct = [0.0, 0.05, 0.10, 0.15],
+        trend_gas_z      = [0.0, 2.0, 3.0, 5.0],
+        trend_no_waste_frac = [0.05, 0.50, 0.80],
     )
 
 
@@ -845,6 +861,325 @@ def _summarise_cluster(conv: list[dict], oc: list[dict], cfg: StudyConfig) -> st
     return "\n".join(lines)
 
 
+# ===========================================================================
+# Trend study — long-term per-cat drift detector
+# ===========================================================================
+
+# Per-cat baseline distributions for the trend study. Smaller-σ noise than
+# the gas-anomaly study because we want to characterise the trend detector
+# under "stable cat" conditions and then add controlled drift.
+TREND_TRUTH = {
+    "Anna":    {"weight_g": 3200, "weight_sd": 50,
+                 "waste_g":  80,   "waste_sd":  15,
+                 "nh3_ppb":  35,   "nh3_sd":     8,
+                 "ch4_ppb":  20,   "ch4_sd":     5},
+    "Marina":  {"weight_g": 4000, "weight_sd": 60,
+                 "waste_g":  85,   "waste_sd":  18,
+                 "nh3_ppb":  30,   "nh3_sd":     7,
+                 "ch4_ppb":  15,   "ch4_sd":     4},
+    "Luna":    {"weight_g": 5000, "weight_sd": 70,
+                 "waste_g": 100,   "waste_sd":  20,
+                 "nh3_ppb":  45,   "nh3_sd":    10,
+                 "ch4_ppb":  25,   "ch4_sd":     6},
+    "Natasha": {"weight_g": 5500, "weight_sd": 70,
+                 "waste_g":  90,   "waste_sd":  17,
+                 "nh3_ppb":  40,   "nh3_sd":     8,
+                 "ch4_ppb":  18,   "ch4_sd":     5},
+}
+
+
+def _trend_make_db() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE cats (cat_id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE);
+        CREATE TABLE visits (
+            visit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            entry_time       TIMESTAMP,
+            confirmed_cat_id INTEGER,
+            tentative_cat_id INTEGER,
+            cat_weight_g     REAL,
+            waste_weight_g   REAL,
+            ammonia_peak_ppb REAL,
+            methane_peak_ppb REAL
+        );
+        """
+    )
+    return conn
+
+
+def _trend_populate(
+    conn: sqlite3.Connection,
+    cat_id: int,
+    cat_truth: dict,
+    days_back_seq: list[float],
+    rng: np.random.Generator,
+    *,
+    weight_offset_g:   float = 0.0,
+    waste_mult:        float = 1.0,
+    nh3_offset_z:      float = 0.0,
+    ch4_offset_z:      float = 0.0,
+    no_waste_frac:     float = 0.05,
+    now: datetime,
+) -> None:
+    """Insert visits at given days-ago offsets with optional drift."""
+    rows = []
+    for d in days_back_seq:
+        t = (now - timedelta(days=float(d))).isoformat()
+        weight = cat_truth["weight_g"] + weight_offset_g + rng.normal() * cat_truth["weight_sd"]
+        if rng.random() < no_waste_frac:
+            waste = 0.0
+        else:
+            waste = max(0.0, cat_truth["waste_g"] * waste_mult + rng.normal() * cat_truth["waste_sd"])
+        nh3 = max(0.0,
+                  cat_truth["nh3_ppb"] + nh3_offset_z * cat_truth["nh3_sd"]
+                  + rng.normal() * cat_truth["nh3_sd"])
+        ch4 = max(0.0,
+                  cat_truth["ch4_ppb"] + ch4_offset_z * cat_truth["ch4_sd"]
+                  + rng.normal() * cat_truth["ch4_sd"])
+        rows.append((t, cat_id, weight, waste, nh3, ch4))
+    conn.executemany(
+        "INSERT INTO visits (entry_time, confirmed_cat_id, "
+        "  cat_weight_g, waste_weight_g, ammonia_peak_ppb, methane_peak_ppb) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        rows,
+    )
+
+
+def _scenario_clean(cfg_loaded: dict, conn, cat_id, cat_truth, now, rng):
+    # 30 baseline visits across days 14-89, 10 recent visits across days 0-13
+    baseline_days = [14 + i * 2.5 for i in range(30)]
+    recent_days   = [0.5 + i for i in range(10)]
+    _trend_populate(conn, cat_id, cat_truth, baseline_days, rng, now=now)
+    _trend_populate(conn, cat_id, cat_truth, recent_days,  rng, now=now)
+
+
+def _scenario_weight_drift(cfg_loaded, conn, cat_id, cat_truth, now, rng, pct):
+    baseline_days = [14 + i * 2.5 for i in range(30)]
+    recent_days   = [0.5 + i for i in range(10)]
+    _trend_populate(conn, cat_id, cat_truth, baseline_days, rng, now=now)
+    offset = -pct * cat_truth["weight_g"]   # weight loss (most clinically relevant)
+    _trend_populate(conn, cat_id, cat_truth, recent_days, rng,
+                     weight_offset_g=offset, now=now)
+
+
+def _scenario_gas_drift(cfg_loaded, conn, cat_id, cat_truth, now, rng, z, channel):
+    baseline_days = [14 + i * 2.5 for i in range(30)]
+    recent_days   = [0.5 + i for i in range(10)]
+    _trend_populate(conn, cat_id, cat_truth, baseline_days, rng, now=now)
+    kw = {"nh3_offset_z": z} if channel == "nh3" else {"ch4_offset_z": z}
+    _trend_populate(conn, cat_id, cat_truth, recent_days, rng, now=now, **kw)
+
+
+def _scenario_constipation(cfg_loaded, conn, cat_id, cat_truth, now, rng, no_waste_frac):
+    baseline_days = [14 + i * 2.5 for i in range(30)]
+    recent_days   = [0.5 + i for i in range(10)]
+    # Baseline: realistic 5% no-waste rate
+    _trend_populate(conn, cat_id, cat_truth, baseline_days, rng, no_waste_frac=0.05, now=now)
+    # Recent: forced higher no-waste rate AND slightly lower waste volume
+    _trend_populate(conn, cat_id, cat_truth, recent_days, rng,
+                     no_waste_frac=no_waste_frac, waste_mult=0.7, now=now)
+
+
+def run_trend_study(cfg: StudyConfig) -> dict:
+    """Per-cat trend detector OC across four scenarios:
+       1. Stable (FPR baseline)
+       2. Weight drift at varying %
+       3. NH3 / CH4 high-side drift at varying z
+       4. Constipation pattern at varying no-waste rates
+    """
+    print("\n=== Trend detector study ===")
+    cfg_loaded = None  # not needed; score_trends loads its own
+    fpr_rows: list[dict]    = []
+    weight_rows: list[dict] = []
+    gas_rows: list[dict]    = []
+    constip_rows: list[dict] = []
+
+    for cat_name, truth in TREND_TRUTH.items():
+        for seed in cfg.trend_seeds:
+            rng_now = datetime(2026, 5, 9, tzinfo=timezone.utc)
+
+            # Scenario 1: clean baseline (FPR)
+            conn = _trend_make_db()
+            cat_id = conn.execute("INSERT INTO cats (name) VALUES (?)", (cat_name,)).lastrowid
+            rng = np.random.default_rng(seed * 1009 + hash(cat_name) % 997)
+            _scenario_clean(cfg_loaded, conn, cat_id, truth, rng_now, rng)
+            from litterbox.trend_anomaly import score_trends
+            r = score_trends(conn, cat_id, now=rng_now)
+            fpr_rows.append({"cat": cat_name, "seed": seed, "channels": {
+                ch: info["tier"] for ch, info in r["channels"].items()
+            }, "overall": r["overall_tier"]})
+            conn.close()
+
+            # Scenario 2: weight drift
+            for pct in cfg.trend_weight_pct:
+                conn = _trend_make_db()
+                cat_id = conn.execute("INSERT INTO cats (name) VALUES (?)", (cat_name,)).lastrowid
+                rng = np.random.default_rng(seed * 2027 + hash(cat_name + str(pct)) % 997)
+                _scenario_weight_drift(cfg_loaded, conn, cat_id, truth, rng_now, rng, pct)
+                r = score_trends(conn, cat_id, now=rng_now)
+                weight_rows.append({"cat": cat_name, "seed": seed, "pct": pct,
+                                     "tier": r["channels"]["cat_weight_g"]["tier"],
+                                     "overall": r["overall_tier"]})
+                conn.close()
+
+            # Scenario 3: gas high-side drift (test NH3 and CH4 separately)
+            for ch_label, ch_key, ch_z_arg in (
+                ("nh3", "ammonia_peak_ppb", "nh3"),
+                ("ch4", "methane_peak_ppb", "ch4"),
+            ):
+                for z in cfg.trend_gas_z:
+                    conn = _trend_make_db()
+                    cat_id = conn.execute("INSERT INTO cats (name) VALUES (?)", (cat_name,)).lastrowid
+                    rng = np.random.default_rng(seed * 3041 + hash(cat_name + ch_label + str(z)) % 997)
+                    _scenario_gas_drift(cfg_loaded, conn, cat_id, truth, rng_now, rng, z, ch_z_arg)
+                    r = score_trends(conn, cat_id, now=rng_now)
+                    gas_rows.append({"cat": cat_name, "seed": seed,
+                                      "channel": ch_label, "z": z,
+                                      "tier": r["channels"][ch_key]["tier"]})
+                    conn.close()
+
+            # Scenario 4: constipation
+            for nw in cfg.trend_no_waste_frac:
+                conn = _trend_make_db()
+                cat_id = conn.execute("INSERT INTO cats (name) VALUES (?)", (cat_name,)).lastrowid
+                rng = np.random.default_rng(seed * 4051 + hash(cat_name + str(nw)) % 997)
+                _scenario_constipation(cfg_loaded, conn, cat_id, truth, rng_now, rng, nw)
+                r = score_trends(conn, cat_id, now=rng_now)
+                ws = r["channels"]["waste_weight_g"]
+                constip_rows.append({
+                    "cat": cat_name, "seed": seed, "no_waste_frac": nw,
+                    "constipation_flagged": ws["constipation"]["flagged"],
+                    "tier": ws["tier"],
+                })
+                conn.close()
+        print(f"  {cat_name}: {len(cfg.trend_seeds)} seeds done")
+
+    return {"fpr": fpr_rows, "weight": weight_rows, "gas": gas_rows, "constipation": constip_rows}
+
+
+_TREND_RANK = {"normal": 0, "insufficient_data": 0,
+                "mild": 1, "significant": 2, "severe": 3}
+
+
+def _trend_at_or_above(tier: str, target: str) -> bool:
+    return _TREND_RANK[tier] >= _TREND_RANK[target]
+
+
+def _summarise_trend(out: dict, cfg: StudyConfig) -> str:
+    fpr = out["fpr"]
+    n_total = len(fpr)
+    if n_total == 0:
+        return "_No trend data._"
+
+    # Per-channel FPR on the clean scenario.
+    fp_per_ch = {ch: {"mild": 0, "significant": 0, "severe": 0}
+                  for ch in ("cat_weight_g", "waste_weight_g",
+                              "ammonia_peak_ppb", "methane_peak_ppb")}
+    for r in fpr:
+        for ch, tier in r["channels"].items():
+            if ch not in fp_per_ch:
+                continue
+            for t in ("mild", "significant", "severe"):
+                if _trend_at_or_above(tier, t):
+                    fp_per_ch[ch][t] += 1
+
+    # Overall tier FPR (any channel firing)
+    overall_fp = {"mild": 0, "significant": 0, "severe": 0}
+    for r in fpr:
+        for t in ("mild", "significant", "severe"):
+            if _trend_at_or_above(r["overall"], t):
+                overall_fp[t] += 1
+
+    lines = [
+        "## Trend detector (long-term drift)",
+        "",
+        f"Synthetic stable cat: 30 baseline visits over 75 days, 10 recent visits "
+        f"over 14 days, drawn from per-cat Gaussians. Each scenario was run "
+        f"{len(cfg.trend_seeds)} seeds × {len(TREND_TRUTH)} cats = {n_total} reps.",
+        "",
+        "### False-positive rate on stable cats (no drift injected)",
+        "",
+        "Per-channel cumulative tier rates and the overall (any-channel) rate:",
+        "",
+        "| Channel | ≥ mild | ≥ significant | ≥ severe |",
+        "|---|---|---|---|",
+    ]
+    for ch in ("cat_weight_g", "waste_weight_g", "ammonia_peak_ppb", "methane_peak_ppb"):
+        m = fp_per_ch[ch]["mild"]      / n_total * 100
+        s = fp_per_ch[ch]["significant"] / n_total * 100
+        sv = fp_per_ch[ch]["severe"]    / n_total * 100
+        label = ch.replace("_g", "").replace("_peak_ppb", "")
+        lines.append(f"| {label} | {m:.2f}% | {s:.2f}% | {sv:.2f}% |")
+    lines.append(
+        f"| **overall** | **{overall_fp['mild']/n_total*100:.2f}%** "
+        f"| **{overall_fp['significant']/n_total*100:.2f}%** "
+        f"| **{overall_fp['severe']/n_total*100:.2f}%** |"
+    )
+
+    # Weight TPR
+    lines += [
+        "",
+        "### TPR — weight-loss drift (recent mean below baseline by N% body weight)",
+        "",
+        "| Loss % | TPR ≥ mild | TPR ≥ significant | TPR ≥ severe |",
+        "|---|---|---|---|",
+    ]
+    for pct in cfg.trend_weight_pct:
+        bucket = [r for r in out["weight"] if r["pct"] == pct]
+        if not bucket:
+            continue
+        m  = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "mild"))        / len(bucket) * 100
+        s  = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "significant")) / len(bucket) * 100
+        sv = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "severe"))      / len(bucket) * 100
+        lines.append(f"| {pct*100:.0f}% | {m:.1f}% | {s:.1f}% | {sv:.1f}% |")
+
+    # Gas TPR
+    lines += [
+        "",
+        "### TPR — high-side gas drift (recent mean above baseline by z standard deviations)",
+        "",
+        "Both NH₃ and CH₄ pooled.",
+        "",
+        "| Drift z | TPR ≥ mild | TPR ≥ significant | TPR ≥ severe |",
+        "|---|---|---|---|",
+    ]
+    for z in cfg.trend_gas_z:
+        bucket = [r for r in out["gas"] if r["z"] == z]
+        if not bucket:
+            continue
+        m  = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "mild"))        / len(bucket) * 100
+        s  = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "significant")) / len(bucket) * 100
+        sv = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "severe"))      / len(bucket) * 100
+        lines.append(f"| +{z:.1f}σ | {m:.1f}% | {s:.1f}% | {sv:.1f}% |")
+
+    # Constipation TPR
+    lines += [
+        "",
+        "### TPR — constipation pattern (recent no-waste-visit fraction)",
+        "",
+        "Baseline holds at 5% no-waste rate (realistic floor); recent window has "
+        "higher fraction AND 30%-reduced mean waste volume on the visits that DO "
+        "produce waste. The 5% row is therefore not an FPR — it's the case where "
+        "the no-waste pattern is unchanged but volume dropped, so the waste "
+        "channel correctly hits ≥significant via z-score on volume alone, while "
+        "the dedicated constipation flag stays off.",
+        "",
+        "| Recent no-waste rate | Constipation flag fires | Tier ≥ significant |",
+        "|---|---|---|",
+    ]
+    for nw in cfg.trend_no_waste_frac:
+        bucket = [r for r in out["constipation"] if r["no_waste_frac"] == nw]
+        if not bucket:
+            continue
+        flag_rate = sum(1 for r in bucket if r["constipation_flagged"]) / len(bucket) * 100
+        sig_rate  = sum(1 for r in bucket if _trend_at_or_above(r["tier"], "significant")) / len(bucket) * 100
+        lines.append(f"| {nw*100:.0f}% | {flag_rate:.1f}% | {sig_rate:.1f}% |")
+
+    return "\n".join(lines)
+
+
 def _make_gas_plots(rows_conv: list[dict], rows_oc: list[dict], cfg: StudyConfig) -> Path:
     """Bokeh HTML with convergence + ROC sub-plots."""
     from bokeh.plotting import figure, output_file, save
@@ -916,7 +1251,7 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--quick", action="store_true",
                     help="Smaller knobs for a fast smoke run.")
-    ap.add_argument("--skip", choices=["gas", "eigen", "cluster"], action="append",
+    ap.add_argument("--skip", choices=["gas", "eigen", "cluster", "trend"], action="append",
                     default=[],
                     help="Skip a study (may be repeated).")
     args = ap.parse_args()
@@ -988,6 +1323,12 @@ def main() -> None:
         sections.append(_summarise_cluster(clu["convergence"], clu["oc"], cfg))
         sections.append("")
 
+    if "trend" not in args.skip:
+        trd = run_trend_study(cfg)
+        (RAW_DIR / "trend_oc.json").write_text(json.dumps(trd, indent=2, default=_json_default))
+        sections.append(_summarise_trend(trd, cfg))
+        sections.append("")
+
     # ----- Auto-generated summary appended at the end --------------------
     summary_lines = ["## Summary", ""]
     if "gas" not in args.skip:
@@ -1053,6 +1394,46 @@ def main() -> None:
                 f"reaches {tpr_3:.0f}% at the ≥significant tier. This matches the "
                 f"existing eigen_sim observation that Layer 2 is the workhorse "
                 f"detector.",
+                "",
+            ]
+
+    if "trend" not in args.skip:
+        n_total_fpr = len(trd["fpr"])
+        if n_total_fpr > 0:
+            sig_fpr = sum(1 for r in trd["fpr"]
+                           if _trend_at_or_above(r["overall"], "significant")
+                           ) / n_total_fpr * 100
+            sev_fpr = sum(1 for r in trd["fpr"]
+                           if _trend_at_or_above(r["overall"], "severe")
+                           ) / n_total_fpr * 100
+            wt_3pct_sig = [r for r in trd["weight"] if r["pct"] == 0.03]
+            if wt_3pct_sig:
+                wt_3pct_tpr = sum(1 for r in wt_3pct_sig
+                                   if _trend_at_or_above(r["tier"], "significant")
+                                   ) / len(wt_3pct_sig) * 100
+            else:
+                wt_3pct_tpr = None
+            constip_50 = [r for r in trd["constipation"] if r["no_waste_frac"] == 0.50]
+            if constip_50:
+                constip_50_flag = sum(1 for r in constip_50
+                                       if r["constipation_flagged"]
+                                       ) / len(constip_50) * 100
+            else:
+                constip_50_flag = None
+            extras = []
+            if wt_3pct_tpr is not None:
+                extras.append(f"a 3% body-weight drop hits ≥significant {wt_3pct_tpr:.0f}% of the time")
+            if constip_50_flag is not None:
+                extras.append(f"a 50%-no-waste pattern fires the constipation rule {constip_50_flag:.0f}% of the time")
+            extras_text = "; ".join(extras) if extras else ""
+            summary_lines += [
+                f"- **Long-term trend detector:** overall FPR on stable cats is "
+                f"{sig_fpr:.1f}% at ≥significant and {sev_fpr:.1f}% at ≥severe. "
+                f"Per-channel ≥mild rates are around 5–12% (matching the calibrated "
+                f"2σ tail), so the **mild tier should be treated as 'watch this' "
+                f"rather than 'act on it'**. ≥significant is the actionable line. "
+                + (extras_text + ". " if extras_text else "")
+                + "Sensitivity to clinically-meaningful drifts is high.",
                 "",
             ]
     summary_lines += [

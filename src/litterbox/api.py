@@ -36,6 +36,9 @@ Quick start::
     print(agent.plot_cat_history("Whiskers", days=90))
     print(agent.eigen_report("Whiskers"))
 
+    # Long-term trend report (drift in weight / waste / gas vs baseline)
+    print(agent.get_trend_summary("Whiskers"))
+
     # Natural language queries via the full LangGraph agent
     response = agent.query("How many times did Whiskers visit this week?")
     print(response)
@@ -451,6 +454,33 @@ class LitterboxAgent:
         from litterbox.tools import eigen_report as _er
         return _er.invoke({"cat_name": cat_name})
 
+    def get_trend_summary(
+        self, cat_name: str,
+        days_recent: int = 14, days_baseline: int = 75,
+    ) -> str:
+        """Long-term trend report across body weight, waste output, and gas peaks.
+
+        Compares the last ``days_recent`` days against the ``days_baseline``
+        days before that. Catches slow drifts the per-visit detectors miss:
+        gradual weight loss/gain, gradually rising NH₃/CH₄, constipation
+        patterns. See ``trend_anomaly.py`` for the per-channel rules.
+
+        Parameters
+        ----------
+        cat_name:
+            Registered cat's name.
+        days_recent:
+            Recent-window length in days (default 14).
+        days_baseline:
+            Baseline-window length in days, immediately prior (default 75).
+        """
+        from litterbox.tools import get_trend_summary as _gts
+        return _gts.invoke({
+            "cat_name": cat_name,
+            "days_recent": days_recent,
+            "days_baseline": days_baseline,
+        })
+
     # ------------------------------------------------------------------
     # Natural language queries via the full LangGraph agent
     # ------------------------------------------------------------------
@@ -458,7 +488,7 @@ class LitterboxAgent:
     def query(self, message: str, thread_id: str = "api") -> str:
         """Send a natural language message to the agent and return the response.
 
-        The agent has access to all 14 tools and maintains conversation history
+        The agent has access to all 15 tools and maintains conversation history
         within the given ``thread_id``.
 
         Parameters

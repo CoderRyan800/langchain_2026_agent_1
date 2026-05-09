@@ -24,3 +24,6 @@ simulator/sim_ground_truth.json
 simulator/simulation_report.md
 simulator/api_sim_ground_truth.json
 simulator/api_simulation_report.md
+simulator/oc_report.md
+simulator/oc_plots/
+simulator/oc_raw/

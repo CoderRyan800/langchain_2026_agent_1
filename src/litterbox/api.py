@@ -28,8 +28,13 @@ Quick start::
     print(agent.get_anomalous_visits())
     print(agent.get_unconfirmed_visits())
     print(agent.get_visit_images(visit_id=5))
+    print(agent.get_visit_details(visit_id=5))
     print(agent.confirm_identity(visit_id=5, cat_name="Whiskers"))
     print(agent.retroactive_recognition("Whiskers", "2026-01-01"))
+
+    # HTML reports (return file paths)
+    print(agent.plot_cat_history("Whiskers", days=90))
+    print(agent.eigen_report("Whiskers"))
 
     # Natural language queries via the full LangGraph agent
     response = agent.query("How many times did Whiskers visit this week?")
@@ -43,6 +48,7 @@ Quick start::
 from __future__ import annotations
 
 import atexit
+import sys
 from pathlib import Path
 from typing import Optional
 
@@ -174,8 +180,11 @@ class LitterboxAgent:
         if self._saver_ctx is not None:
             try:
                 self._saver_ctx.__exit__(None, None, None)
-            except Exception:
-                pass
+            except Exception as e:
+                # Called from atexit / __exit__ — never re-raise, but don't
+                # swallow silently either: a locked DB on the next run needs
+                # a breadcrumb.
+                sys.stderr.write(f"LitterboxAgent.close: {e}\n")
             self._saver_ctx = None
             self._checkpointer = None
 
@@ -391,6 +400,55 @@ class LitterboxAgent:
         from litterbox.tools import get_visit_images as _gvi
         return _gvi.invoke({"visit_id": visit_id})
 
+    def get_visit_details(self, visit_id: int) -> str:
+        """Return a complete report for a single visit by visit number.
+
+        Includes identity, timing, all sensor readings, the data-driven gas
+        anomaly score (tier, z-scores, sample size, model used), the GPT-4o
+        health analysis, and image paths.
+
+        Parameters
+        ----------
+        visit_id:
+            The visit number.
+        """
+        from litterbox.tools import get_visit_details as _gvd
+        return _gvd.invoke({"visit_id": visit_id})
+
+    def plot_cat_history(self, cat_name: str, days: int = 90) -> str:
+        """Generate an HTML history plot for one cat's recent visits.
+
+        Returns the absolute path to the generated HTML file. The plot has
+        three stacked time-series sub-plots (weight, NH₃ peak, CH₄ peak),
+        anomalous visits marked as red ✕ markers, hover tooltips with
+        z-scores and tier, and per-cat alarm-threshold reference lines.
+
+        Parameters
+        ----------
+        cat_name:
+            Registered cat's name.
+        days:
+            Days of history to include (default 90).
+        """
+        from litterbox.tools import plot_cat_history as _pch
+        return _pch.invoke({"cat_name": cat_name, "days": days})
+
+    def eigen_report(self, cat_name: str) -> str:
+        """Generate an eigenanalysis HTML report for a cat's visit waveforms.
+
+        Produces a self-contained HTML file with the waveform overlay plot
+        and a per-visit summary table (DC term, explained variance,
+        signal-subspace coefficients, EV anomaly level, GMM cluster
+        assignment, and cluster log-likelihood z-score).
+
+        Parameters
+        ----------
+        cat_name:
+            Registered cat's name.
+        """
+        from litterbox.tools import eigen_report as _er
+        return _er.invoke({"cat_name": cat_name})
+
     # ------------------------------------------------------------------
     # Natural language queries via the full LangGraph agent
     # ------------------------------------------------------------------
@@ -398,7 +456,7 @@ class LitterboxAgent:
     def query(self, message: str, thread_id: str = "api") -> str:
         """Send a natural language message to the agent and return the response.
 
-        The agent has access to all 11 tools and maintains conversation history
+        The agent has access to all 14 tools and maintains conversation history
         within the given ``thread_id``.
 
         Parameters

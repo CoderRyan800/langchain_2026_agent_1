@@ -62,7 +62,7 @@ python src/litterbox_agent.py --event exit --image images/captures/exit.jpg \
 
 ```bash
 # Automated pytest (no LLM calls — fast)
-pytest -m "not slow"                          # 180 tests, ~10 s
+pytest -m "not slow"                          # 585 tests, ~22 s
 pytest -m slow                                # CLIP embedding tests (downloads ~350 MB model once)
 
 # Manual integration test runner (uses real LLM API calls)
@@ -163,7 +163,7 @@ Bob writes to `agent_memory.db`. The litter box agent writes to `data/agent_litt
 │       ├── gas_anomaly.py       # Per-cat data-driven NH₃/CH₄ detector (median + MAD)
 │       ├── history_plot.py      # Per-cat Bokeh history plots (weight, NH₃, CH₄)
 │       ├── rescore.py           # Re-score historical visits against current detector
-│       └── tools.py             # All 13 LangChain tools (record_entry/exit + queries + plots)
+│       └── tools.py             # All 14 LangChain tools (record_entry/exit + queries + plots + eigen report)
 ├── tests/
 │   ├── run_manual_test.py       # Manual integration test runner (8 phases, 80+ checks)
 │   ├── conftest.py              # Shared pytest fixtures and isolation helpers

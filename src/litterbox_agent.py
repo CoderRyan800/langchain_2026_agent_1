@@ -125,6 +125,16 @@ def run_sensor_event(
         system_prompt=SYSTEM_PROMPT,
         checkpointer=checkpointer,
         tools=ALL_TOOLS,
+        # The sensor thread is shared across every CLI-triggered visit, so
+        # without summarization it grows unboundedly and every tick pays the
+        # full prior history.
+        middleware=[
+            SummarizationMiddleware(
+                model="gpt-4o",
+                trigger=("messages", 10),
+                keep=("messages", 3),
+            )
+        ],
     )
     # Sensor events use a dedicated thread so they don't pollute interactive history
     config = {"configurable": {"thread_id": "sensor"}}

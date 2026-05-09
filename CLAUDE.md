@@ -7,7 +7,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Two AI agents built with LangChain and LangGraph:
 
 - **Bob** (`src/basic_agent.py`) — General-purpose conversational assistant with web search and multimodal file upload
-- **Litter Box Monitor** (`src/litterbox_agent.py`) — Automated cat health monitoring via litter box camera images, with 11 LangChain tools, two-stage CLIP+GPT-4o identity pipeline, sensor data ingestion (weight scale, gas sensors), and health analysis
+- **Litter Box Monitor** (`src/litterbox_agent.py`) — Automated cat health monitoring via litter box camera images, with 14 LangChain tools, two-stage CLIP+GPT-4o identity pipeline, sensor data ingestion (weight scale, gas sensors), and health analysis
 
 ## Environment Setup
 
@@ -80,7 +80,7 @@ Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt bui
 - **`src/litterbox/gas_anomaly.py`** — Data-driven per-cat NH₃/CH₄ detector. Median + MAD-based sigma on `log1p`-transformed peak readings, signed z-scores, alarm only on the high tail, tier ∈ {`normal`, `mild`≥2σ, `significant`≥3σ, `severe`≥5σ, `insufficient_data`}. Fits on demand from the `visits` table — no separate persisted model. Per-cat fit when ≥`min_visits_per_cat` non-null readings, else pooled fallback at ≥`min_visits_pooled`, else `insufficient_data`. Excludes the current visit_id from its own fit. Robust statistics (50% breakdown point) so historical contamination by prior anomalies doesn't suppress new ones.
 - **`src/litterbox/history_plot.py`** — Per-cat Bokeh HTML report. Three stacked sub-plots (linked time axis): cat weight (linear y), NH₃ peak and CH₄ peak (log y, since the detector works in log-space). Anomalous visits are red ✕ markers; normal visits are blue dots. Hover tooltips show visit ID, raw reading, signed z-score, tier, and which model produced the score. Solid green reference line at the cat's robust median; orange/red dashed lines at the mild/significant alarm thresholds back-projected from log space. Default 90-day window. Output writes to `output/cat_history_<name>.html` (gitignored).
 - **`src/litterbox/rescore.py`** — One-shot maintenance utility that re-derives every visit's gas-anomaly columns and `is_anomalous` flag against the *current* detector. The `is_anomalous` column is written once at `record_exit` time and never updated by live operation, so visits scored under older detector versions keep stale verdicts. The rescorer fixes the dataset to a single consistent verdict policy: `is_anomalous = LLM_yes_recovered_from_health_notes OR (gas_tier in ALARM_TIERS)`. Idempotent. Stamps `gas_anomaly_rescored_at` on changed rows. Library function `rescore_all_visits(conn, dry_run)` plus `python -m litterbox.rescore [--dry-run]` CLI.
-- **`src/litterbox/tools.py`** — 13 `@tool` functions; docstrings auto-generate LangChain tool descriptions. Per-visit detail (`get_visit_details(visit_id)`) and history-plot generation (`plot_cat_history(cat_name, days=90)`) supplement the existing list-style query tools so the agent can answer specific "explain visit N" and "show me a chart" questions.
+- **`src/litterbox/tools.py`** — 14 `@tool` functions; docstrings auto-generate LangChain tool descriptions. Per-visit detail (`get_visit_details(visit_id)`), history-plot generation (`plot_cat_history(cat_name, days=90)`), and the eigenanalysis HTML report (`eigen_report(cat_name)`, added with Step 5b) supplement the existing list-style query tools so the agent can answer specific "explain visit N", "show me a chart", and "show me the eigenanalysis report" questions.
 
 ### Two-Stage Cat ID Pipeline
 1. **CLIP** (local, free): embeds entry image, queries Chroma for top candidates
@@ -658,7 +658,7 @@ VisitAnalyser
   leaves newer ones intact.
 - `confirm_identity` with `td_visit_id` updates the correct table.
 
-**Step 4 status: COMPLETE** — `visit_analyser.py`, `image_retention.py`, `td_visits` schema, 24 tests pass.
+**Step 4 status: COMPLETE** — `visit_analyser.py`, `image_retention.py`, `td_visits` schema, 23 tests pass.
 
 ---
 

@@ -36,6 +36,45 @@ from typing import Optional
 import numpy as np
 
 from litterbox.db import get_conn, init_db
+from litterbox.time_buffer import load_td_config
+
+
+# Lazily-cached thresholds from td_config.json. Reports stay in sync with
+# whatever the analyser was configured with — no duplicated literals.
+_EV_THRESHOLDS: Optional[dict] = None
+_CLUSTER_Z_THRESHOLDS: Optional[dict] = None
+# Defaults match td_config.json shipped with the repo; used only as a
+# fallback when load_td_config() raises (missing file in odd test setups).
+_EV_DEFAULTS = {"normal": 0.90, "mild": 0.70, "significant": 0.40}
+_CLUSTER_Z_DEFAULTS = {"mild": -2.0, "significant": -3.0, "major": -4.0}
+
+
+def _ev_thresholds() -> dict:
+    global _EV_THRESHOLDS
+    if _EV_THRESHOLDS is None:
+        try:
+            cfg = load_td_config()
+            _EV_THRESHOLDS = {
+                **_EV_DEFAULTS,
+                **cfg.get("eigen", {}).get("anomaly_thresholds", {}),
+            }
+        except Exception:
+            _EV_THRESHOLDS = dict(_EV_DEFAULTS)
+    return _EV_THRESHOLDS
+
+
+def _cluster_z_thresholds() -> dict:
+    global _CLUSTER_Z_THRESHOLDS
+    if _CLUSTER_Z_THRESHOLDS is None:
+        try:
+            cfg = load_td_config()
+            _CLUSTER_Z_THRESHOLDS = {
+                **_CLUSTER_Z_DEFAULTS,
+                **cfg.get("cluster", {}).get("z_score_thresholds", {}),
+            }
+        except Exception:
+            _CLUSTER_Z_THRESHOLDS = dict(_CLUSTER_Z_DEFAULTS)
+    return _CLUSTER_Z_THRESHOLDS
 
 
 # ===========================================================================
@@ -252,11 +291,12 @@ def _classify_ev(ev: Optional[float]) -> str:
     """Classify an EV value into an anomaly level string."""
     if ev is None:
         return "unscored"
-    if ev >= 0.90:
+    t = _ev_thresholds()
+    if ev >= float(t["normal"]):
         return "normal"
-    elif ev >= 0.70:
+    elif ev >= float(t["mild"]):
         return "mild"
-    elif ev >= 0.40:
+    elif ev >= float(t["significant"]):
         return "significant"
     else:
         return "major"
@@ -470,15 +510,17 @@ def _build_data_table(summaries: list[dict]) -> str:
         k_cl = str(s.get('k_clusters')) if s.get('k_clusters') is not None else "—"
         cl_assign = str(s.get('cluster_assignment')) if s.get('cluster_assignment') is not None else "—"
         z_val = f"{s['cluster_z_score']:.2f}" if s.get('cluster_z_score') is not None else "—"
-        # Color z-score by severity.
+        # Color z-score by severity (thresholds from td_config.json so the
+        # report stays consistent with cluster_analyser's classifications).
         z_class = "ev-normal"
         if s.get('cluster_z_score') is not None:
             z = s['cluster_z_score']
-            if z < -4.0:
+            zt = _cluster_z_thresholds()
+            if z < float(zt["major"]):
                 z_class = "ev-major"
-            elif z < -3.0:
+            elif z < float(zt["significant"]):
                 z_class = "ev-significant"
-            elif z < -2.0:
+            elif z < float(zt["mild"]):
                 z_class = "ev-mild"
 
         rows_html.append(f"""<tr>

@@ -194,6 +194,22 @@ class EigenAnalyser(BaseAnalyser):
         # --- Covariance matrix ---
         X = np.array(vectors)  # (K, L)
         K = X.shape[0]
+        if K < 2:
+            # Defensive: per_cat_minimum / pooled_minimum default to 32 / 128
+            # so this branch is unreachable in default config, but a user who
+            # tunes them down to 1 would otherwise hit a ZeroDivisionError on
+            # the (K - 1) divisor below.
+            return AnalysisResult(
+                plugin_name="eigen",
+                anomaly_score=0.0,
+                anomaly_level="insufficient_data",
+                details={
+                    "reason": "k_lt_2",
+                    "k": K,
+                    "model_type": model_type,
+                    "dc_term": dc_term,
+                },
+            )
         C = X.T @ X / (K - 1)  # (L, L)
 
         # --- Regularization ---

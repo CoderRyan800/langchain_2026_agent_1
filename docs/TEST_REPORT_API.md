@@ -1,5 +1,7 @@
 # Test Report — LitterboxAgent Python API
 
+> **Historical artifact (2026-03-28).** The counts, tool inventory ("11 tools"), and bug-fix list below describe the API as it was on the date above. The current tool count is **14** (`get_visit_details`, `plot_cat_history`, and `eigen_report` were added afterward); see `CLAUDE.md` for the present picture. Preserved here for the historical record of the API regression hunt.
+
 **Date:** 2026-03-28
 **Environment:** `langchain_env_2026_1` (Python 3.12.12, pytest 9.0.2)
 **Test file:** `tests/test_api.py`

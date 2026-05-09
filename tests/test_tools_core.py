@@ -73,10 +73,10 @@ class TestRegisterCatImage:
             count = conn.execute("SELECT COUNT(*) FROM cats").fetchone()[0]
         assert count == 2
 
-    def test_nonexistent_path_returns_error(self):
+    def test_nonexistent_path_returns_error(self, tmp_path):
         from litterbox.tools import register_cat_image
         result = register_cat_image.invoke({
-            "image_path": "/tmp/no_such_file_abc_xyz.jpg",
+            "image_path": str(tmp_path / "no_such_file_abc_xyz.jpg"),
             "cat_name":   "Ghost",
         })
         assert "Error" in result

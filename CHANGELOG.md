@@ -8,6 +8,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [Unreleased]
 
+### Added
+- `eigen_report(cat_name)` LangChain tool — wraps the eigenanalysis HTML report generator from `litterbox.eigen_query`, bringing the total tool count to **14**. Older entries below (e.g. "10 LangChain tools" in 0.3.0, "180 fast tests" in 0.5.x) reflect counts at the time of those releases and are not the current numbers.
+
 ---
 
 ## [0.6.0] — 2026-03-21

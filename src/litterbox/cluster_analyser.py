@@ -69,6 +69,15 @@ class ClusterAnalyser(BaseAnalyser):
         self._z_mild: float = float(thresholds.get("mild", -2.0))
         self._z_significant: float = float(thresholds.get("significant", -3.0))
         self._z_major: float = float(thresholds.get("major", -4.0))
+        # Z-score cutoffs must be strictly decreasing; the _classify branches
+        # depend on this ordering and silently produce wrong tiers if violated.
+        if not (self._z_mild > self._z_significant > self._z_major):
+            raise ValueError(
+                "cluster.z_score_thresholds must satisfy "
+                "mild > significant > major (got "
+                f"mild={self._z_mild}, significant={self._z_significant}, "
+                f"major={self._z_major})"
+            )
 
         self._uniform_n: int = int(eigen_cfg.get("uniform_n", 4))
 

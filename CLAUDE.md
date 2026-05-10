@@ -55,14 +55,14 @@ python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 585 tests, ~22 s
+pytest -m "not slow"    # 629 tests, ~22 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 605 tests
+pytest                  # all 649 tests
 ```
 
 Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
 
-Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser/refusal sanitiser), `test_tools_core.py` (query tools incl. `get_visit_details`), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector), `test_history_plot.py` (per-cat Bokeh history plots), `test_rescore.py` (rescoring utility).
+Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser/refusal sanitiser), `test_tools_core.py` (query tools incl. `get_visit_details`), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector), `test_history_plot.py` (per-cat Bokeh history plots), `test_rescore.py` (rescoring utility), `test_trend_anomaly.py` (long-term per-cat trend detector + auto-trigger).
 
 ## Architecture
 

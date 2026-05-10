@@ -24,6 +24,7 @@ This guide covers day-to-day use of both agents in this project.
     - [12.13 Cluster Analysis](#1213-step-5c--cluster-analysis-cluster_analyserpy)
     - [12.14 HTML Reports](#1214-html-reports-and-the-eigen_report-tool)
     - [12.15 Simulation](#1215-simulation)
+13. [Long-Term Trend Detector](#13-long-term-trend-detector)
 
 ---
 
@@ -2157,3 +2158,138 @@ is wrong.
 - Normal visits: mean EV = 0.995, zero false positives
 - Swapped visits: Layer 1 (EV) detection = 0%, Layer 2 (cluster) detection = 100%
 - Calibrated uniform N = 4 (96.5% coverage at 95% EV)
+
+---
+
+## 13. Long-Term Trend Detector
+
+The per-visit detectors (gas anomaly, eigen, cluster) are deliberately blind
+to slow drifts. A cat losing 100 g per month for six months would not trip any
+per-visit alarm because each individual visit looks normal — it's only the
+aggregate that has shifted. The trend detector fills that gap.
+
+### 13.1 What it does
+
+For each cat, it splits the recent history into two windows:
+
+- **Recent**: last 14 days (configurable)
+- **Baseline**: the 75 days before that (configurable)
+
+For each of four channels (`cat_weight_g`, `waste_weight_g`, `ammonia_peak_ppb`,
+`methane_peak_ppb`) it computes a mean-shift z-score and assigns a tier:
+
+| Tier | Meaning |
+|------|---------|
+| `normal` | within 2σ of baseline |
+| `mild` | 2 ≤ \|z\| < 3 — "watch this" |
+| `significant` | 3 ≤ \|z\| < 5 — investigate |
+| `severe` | \|z\| ≥ 5 — almost certainly real, see vet |
+| `insufficient_data` | < 5 recent visits or < 10 baseline visits |
+
+**Direction-aware overlays per channel:**
+
+- **Body weight** also uses clinical % thresholds (5/10/15% of baseline body
+  weight). The worse of the z-tier and pct-tier wins. Either direction
+  (gain or loss) alarms, since both can be clinically relevant.
+- **NH₃ / CH₄** alarm only on the high side. Falling gas readings are
+  good news, not a concern.
+- **Waste** alarms only on the low side, AND only under a **constipation
+  rule** (no-waste-rate ≥ 50%, ratio to baseline ≥ 2×, AND mean waste
+  z-score ≤ -2). Single low-waste visits are meaningless because cats
+  often pee-only — the pattern over a window is the signal.
+
+### 13.2 The two tools
+
+**`get_trend_summary(cat_name, days_recent=14, days_baseline=75)`** — focused
+report for one cat, with per-channel tier, raw means, z-scores, and any
+constipation pattern detected.
+
+```
+You: Has Luna lost weight lately?
+Assistant: [calls get_trend_summary("Luna")]
+  Trend report for 'Luna'  (overall: significant)
+    Recent   (14d):  12 visits
+    Baseline (75d): 41 visits
+
+    ⚠⚠ Body weight [significant]:  recent 4683.4 g (n=12, range 4612-4751)
+       vs baseline 5004.2 g (n=41, range 4912-5096)  z=-7.32  pct=-6.4%
+    ✓  Waste output [normal]:  recent 82.1 g vs baseline 79.5 g  z=+0.41
+    ✓  NH₃ peak [normal]:  recent 41.2 ppb vs baseline 39.8 ppb  z=+0.61
+    ✓  CH₄ peak [normal]:  recent 21.3 ppb vs baseline 22.0 ppb  z=-0.32
+
+    ⚠️  Recommend veterinary review — long-term shift detected.
+```
+
+**`get_trending_cats()`** — scans every registered cat and lists only those
+currently flagged. Returns "no alarms active" when everything is stable.
+
+### 13.3 Auto-trigger via `get_anomalous_visits`
+
+You don't have to call the trend tool explicitly to see active alarms. Every
+call to `get_anomalous_visits` now appends a "Long-term trend alarms" section
+listing any cat currently at mild/significant/severe tier. This is computed
+fresh on every call — no schema changes, no cache, no daily roll-up needed.
+
+```
+You: Show me all anomalous visits.
+Assistant: [calls get_anomalous_visits]
+  3 anomalous visit(s):
+    Visit #129 — ~Anna (tentative ID) at 2026-05-09T22:43:45 …
+    …
+
+  Long-term trend alarms (1 cat(s) currently flagged):
+
+    Luna — overall tier: significant (recent 12 visits / baseline 41 visits)
+      • weight [significant]  (z=-7.32, pct=-6.4%)
+```
+
+### 13.4 Configuration
+
+All knobs live in `td_config.json` under `trend_anomaly`:
+
+```jsonc
+"trend_anomaly": {
+  "days_recent":           14,
+  "days_baseline":         75,
+  "min_visits_recent":      5,
+  "min_visits_baseline":   10,
+
+  "z_score_thresholds": {
+    "mild":         2.0,
+    "significant":  3.0,
+    "severe":       5.0
+  },
+
+  "weight_pct_thresholds": {
+    "mild":         0.05,
+    "significant":  0.10,
+    "severe":       0.15
+  },
+
+  "constipation": {
+    "no_waste_g_cutoff":         5.0,    // visits below this are "no waste"
+    "min_no_waste_rate":         0.50,   // 50%+ of recent visits are no-waste
+    "min_no_waste_ratio":        2.0,    // recent rate >= 2× baseline rate
+    "min_waste_z_score":        -2.0     // mean waste significantly below baseline
+  }
+}
+```
+
+### 13.5 What the calibration says
+
+The trend detector's operating characteristics are characterised in
+`simulator/oc_study.py` (the long-term trend section). Headlines from a
+40-seed × 4-cat synthetic run:
+
+- **Per-channel ≥mild FPR on stable cats**: 5–14% (matches the calibrated
+  2σ Gaussian tail expected for each channel × tail rule)
+- **Overall ≥significant FPR**: 7.5%
+- **Overall ≥severe FPR**: 0.6%
+- **Sensitivity** (3% body-weight loss → ≥significant): 98%
+- **Sensitivity** (50%-no-waste pattern fires constipation rule): 39%
+- **Sensitivity** (70%-no-waste): 84%; (90%-no-waste): 100%
+
+**Practical interpretation**: treat `mild` as "watch this" — a 22.5% any-channel
+mild rate on stable cats is too noisy for "act on it". `significant` is the
+actionable line. `severe` is rare on stable data and almost always a real
+shift.

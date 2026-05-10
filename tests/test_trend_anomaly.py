@@ -403,3 +403,97 @@ class TestAlarmTiersConstant:
         assert ALARM_TIERS == {"mild", "significant", "severe"}
         assert "normal" not in ALARM_TIERS
         assert "insufficient_data" not in ALARM_TIERS
+
+
+# ===========================================================================
+# Auto-trigger: get_trending_cats and get_anomalous_visits surface trend alarms
+# ===========================================================================
+
+class TestAutoTriggerScan:
+    """Tests for _scan_trend_alarms and the agent-facing tools that consume it."""
+
+    def test_no_cats_returns_empty(self):
+        from litterbox.tools import _scan_trend_alarms
+        with get_conn() as conn:
+            assert _scan_trend_alarms(conn) == []
+
+    def test_stable_cat_does_not_appear(self, cat_with_baseline):
+        # cat_with_baseline has only baseline visits, no recent → insufficient_data
+        # which means the cat should NOT appear in trend alarms.
+        from litterbox.tools import _scan_trend_alarms
+        with get_conn() as conn:
+            alarms = _scan_trend_alarms(conn)
+        cat_names = [a["cat_name"] for a in alarms]
+        assert "Whiskers" not in cat_names
+
+    def test_weight_loss_cat_appears(self, cat_with_baseline):
+        rng = random.Random(42)
+        days_recent = [0.5 + i for i in range(10)]
+        # 12% drop is firmly in significant pct + huge z-score → severe
+        _insert_visits(
+            cat_with_baseline, days_recent,
+            weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
+            waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
+        )
+        from litterbox.tools import _scan_trend_alarms
+        with get_conn() as conn:
+            alarms = _scan_trend_alarms(conn)
+        names = [a["cat_name"] for a in alarms]
+        assert "Whiskers" in names
+        whiskers = next(a for a in alarms if a["cat_name"] == "Whiskers")
+        firing_channels = {f["channel"] for f in whiskers["firing"]}
+        assert "cat_weight_g" in firing_channels
+
+
+class TestGetTrendingCatsTool:
+    def test_no_alarms_message_when_empty(self):
+        from litterbox.tools import get_trending_cats
+        result = get_trending_cats.invoke({})
+        assert "No trend alarms" in result
+
+    def test_trending_cat_listed(self, cat_with_baseline):
+        rng = random.Random(43)
+        days_recent = [0.5 + i for i in range(10)]
+        _insert_visits(
+            cat_with_baseline, days_recent,
+            weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
+            waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
+        )
+        from litterbox.tools import get_trending_cats
+        result = get_trending_cats.invoke({})
+        assert "Whiskers" in result
+        assert "weight" in result.lower()
+        assert any(t in result for t in ("mild", "significant", "severe"))
+
+
+class TestGetAnomalousVisitsAutoSurfacesTrends:
+    def test_trend_alarms_appended(self, cat_with_baseline):
+        # No per-visit anomalies, but a clearly trending cat.
+        rng = random.Random(44)
+        days_recent = [0.5 + i for i in range(10)]
+        _insert_visits(
+            cat_with_baseline, days_recent,
+            weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
+            waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
+        )
+        from litterbox.tools import get_anomalous_visits
+        result = get_anomalous_visits.invoke({})
+        assert "Long-term trend alarms" in result
+        assert "Whiskers" in result
+
+    def test_empty_db_message(self):
+        from litterbox.tools import get_anomalous_visits
+        result = get_anomalous_visits.invoke({})
+        # No visits, no cats — both branches empty
+        assert "No anomalous visits" in result or "No trend alarms" in result
+
+    def test_per_visit_section_header_when_visits_present(self, cat_with_baseline):
+        # Mark one baseline visit anomalous so the per-visit section fires too.
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE visits SET is_anomalous = 1 "
+                "WHERE visit_id = (SELECT MIN(visit_id) FROM visits)"
+            )
+        from litterbox.tools import get_anomalous_visits
+        result = get_anomalous_visits.invoke({})
+        assert "anomalous visit(s):" in result

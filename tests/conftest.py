@@ -15,6 +15,11 @@ from PIL import Image
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
+# Honour the project .env (LANGSMITH_TRACING=false, etc.) before any test
+# imports a module that might fire a LangSmith trace.
+from dotenv import load_dotenv  # noqa: E402
+load_dotenv(PROJECT_ROOT / ".env", override=True)
+
 # ---------------------------------------------------------------------------
 # Canned GPT-4o health responses used by both fixtures and test assertions
 # ---------------------------------------------------------------------------

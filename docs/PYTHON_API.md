@@ -279,7 +279,7 @@ response: str = agent.query(message: str, thread_id: str = "api")
 ```
 
 Sends any plain-English message to the full LangGraph agent, which can call all
-15 tools and maintains conversation history within the given `thread_id`.
+16 tools and maintains conversation history within the given `thread_id`.
 
 This is the highest-level interface and uses GPT-4o for every call.  Use the
 structured methods above when you want predictable, cost-efficient responses.

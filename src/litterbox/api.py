@@ -39,6 +39,9 @@ Quick start::
     # Long-term trend report (drift in weight / waste / gas vs baseline)
     print(agent.get_trend_summary("Whiskers"))
 
+    # All cats currently flagged for trend drift
+    print(agent.get_trending_cats())
+
     # Natural language queries via the full LangGraph agent
     response = agent.query("How many times did Whiskers visit this week?")
     print(response)
@@ -481,6 +484,15 @@ class LitterboxAgent:
             "days_baseline": days_baseline,
         })
 
+    def get_trending_cats(self) -> str:
+        """Return only the cats currently flagged by the trend detector.
+
+        Iterates every registered cat and includes those with overall trend
+        tier mild/significant/severe. Computed fresh on every call.
+        """
+        from litterbox.tools import get_trending_cats as _gtc
+        return _gtc.invoke({})
+
     # ------------------------------------------------------------------
     # Natural language queries via the full LangGraph agent
     # ------------------------------------------------------------------
@@ -488,7 +500,7 @@ class LitterboxAgent:
     def query(self, message: str, thread_id: str = "api") -> str:
         """Send a natural language message to the agent and return the response.
 
-        The agent has access to all 15 tools and maintains conversation history
+        The agent has access to all 16 tools and maintains conversation history
         within the given ``thread_id``.
 
         Parameters

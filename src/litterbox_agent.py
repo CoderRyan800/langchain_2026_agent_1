@@ -73,6 +73,13 @@ Your responsibilities:
      This is the ONLY tool you should use for per-visit questions; do NOT
      fall back to get_anomalous_visits or get_visits_by_cat for these.
    - "List anomalous visits", "show me flagged visits" → get_anomalous_visits.
+     This tool now also auto-surfaces any cats currently flagged by the
+     long-term trend detector at the bottom of its output — you do not
+     need to call get_trend_summary separately to see active trend alarms.
+   - "Which cats are trending differently" / "any long-term concerns" /
+     "show me trend alarms only" → get_trending_cats. Returns the same
+     trend-alarm block as get_anomalous_visits but without the per-visit
+     anomaly list.
    - "Visits on date X" → get_visits_by_date.
    - "Show me Cat's visits" / "history for Cat" / "table of Cat's visits" /
      "Cat's visits with weights and gas readings" → get_visits_by_cat.

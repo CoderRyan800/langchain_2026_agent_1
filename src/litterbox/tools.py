@@ -608,9 +608,88 @@ def _format_gas_anomaly_summary(row) -> str:
     return "Gas anomaly: " + ", ".join(parts)
 
 
+def _scan_trend_alarms(conn) -> list[dict]:
+    """Score every registered cat against the trend detector and return
+    only those currently in mild/significant/severe on at least one channel.
+
+    Cheap on realistic deployments (≤ ~10 cats × 4 channels of in-memory
+    SQL aggregation each). Computed on every call — no cache, no schema —
+    so the verdict is always against the current detector and the latest
+    visit data.
+    """
+    from litterbox.trend_anomaly import score_trends, ALARM_TIERS
+
+    cats = conn.execute("SELECT cat_id, name FROM cats ORDER BY cat_id").fetchall()
+    alarms = []
+    for cat in cats:
+        try:
+            result = score_trends(conn, cat_id=cat["cat_id"])
+        except Exception:
+            continue
+        if result["overall_tier"] not in ALARM_TIERS:
+            continue
+        firing = []
+        for ch_name, info in result["channels"].items():
+            if info["tier"] in ALARM_TIERS:
+                firing.append({
+                    "channel": ch_name,
+                    "tier":    info["tier"],
+                    "z":       info.get("z_score"),
+                    "pct":     info.get("pct_change"),
+                    "constipation_flagged": info.get("constipation", {}).get("flagged"),
+                })
+        alarms.append({
+            "cat_id":       cat["cat_id"],
+            "cat_name":     cat["name"],
+            "overall_tier": result["overall_tier"],
+            "n_recent":     result["recent_window"]["n_visits"],
+            "n_baseline":   result["baseline_window"]["n_visits"],
+            "firing":       firing,
+        })
+    return alarms
+
+
+def _format_trend_alarms(alarms: list[dict]) -> list[str]:
+    """Render trend-alarm dicts as human-readable lines for the agent."""
+    if not alarms:
+        return []
+    label = {
+        "cat_weight_g":     "weight",
+        "waste_weight_g":   "waste",
+        "ammonia_peak_ppb": "NH₃",
+        "methane_peak_ppb": "CH₄",
+    }
+    lines = [f"\nLong-term trend alarms ({len(alarms)} cat(s) currently flagged):"]
+    for a in alarms:
+        lines.append(
+            f"\n  {a['cat_name']} — overall tier: {a['overall_tier']} "
+            f"(recent {a['n_recent']} visits / baseline {a['n_baseline']} visits)"
+        )
+        for f in a["firing"]:
+            ch = label.get(f["channel"], f["channel"])
+            extras = []
+            if f.get("z") is not None:
+                extras.append(f"z={f['z']:+.2f}")
+            if f.get("pct") is not None:
+                extras.append(f"pct={f['pct']*100:+.1f}%")
+            if f.get("constipation_flagged"):
+                extras.append("constipation flag")
+            lines.append(f"    • {ch} [{f['tier']}]  ({', '.join(extras)})")
+    return lines
+
+
 @tool
 def get_anomalous_visits() -> str:
-    """List all visits flagged as potentially anomalous by the health analysis."""
+    """List all visits flagged as potentially anomalous by the health analysis,
+    plus any cats currently flagged by the long-term trend detector.
+
+    Per-visit anomalies appear first (one entry per flagged visit). At the
+    bottom, any cat whose trend tier is mild/significant/severe is listed
+    with the channels currently firing — this is the auto-trigger surface
+    for the trend detector and is computed fresh on every call against the
+    latest data."""
+    from litterbox.trend_anomaly import score_trends, ALARM_TIERS  # noqa: F401  (used by helper)
+
     init_db()
     with get_conn() as conn:
         rows = conn.execute(
@@ -626,24 +705,48 @@ def get_anomalous_visits() -> str:
                WHERE v.is_anomalous = TRUE
                ORDER BY v.entry_time DESC"""
         ).fetchall()
+        trend_alarms = _scan_trend_alarms(conn)
 
-    if not rows:
-        return "No anomalous visits on record."
+    if not rows and not trend_alarms:
+        return "No anomalous visits on record and no trend alarms active."
 
-    lines = [f"{len(rows)} anomalous visit(s):"]
-    for r in rows:
-        cat = (
-            r["confirmed_name"]
-            if r["is_confirmed"]
-            else (f"~{r['tentative_name']}" if r["tentative_name"] else "Unknown")
-        )
-        status = "confirmed" if r["is_confirmed"] else "tentative ID"
-        lines.append(f"\n  Visit #{r['visit_id']} — {cat} ({status}) at {r['entry_time']}")
-        lines.append(f"    {_format_gas_anomaly_summary(r)}")
-        if r["health_notes"]:
-            snippet = r["health_notes"][:250].replace("\n", " ")
-            lines.append(f"    GPT-4o: {snippet}…")
+    if rows:
+        lines = [f"{len(rows)} anomalous visit(s):"]
+        for r in rows:
+            cat = (
+                r["confirmed_name"]
+                if r["is_confirmed"]
+                else (f"~{r['tentative_name']}" if r["tentative_name"] else "Unknown")
+            )
+            status = "confirmed" if r["is_confirmed"] else "tentative ID"
+            lines.append(f"\n  Visit #{r['visit_id']} — {cat} ({status}) at {r['entry_time']}")
+            lines.append(f"    {_format_gas_anomaly_summary(r)}")
+            if r["health_notes"]:
+                snippet = r["health_notes"][:250].replace("\n", " ")
+                lines.append(f"    GPT-4o: {snippet}…")
+    else:
+        lines = ["No per-visit anomalies on record."]
+
+    lines.extend(_format_trend_alarms(trend_alarms))
     return "\n".join(lines)
+
+
+@tool
+def get_trending_cats() -> str:
+    """List ONLY the cats currently flagged by the long-term trend detector.
+
+    Use this when the user wants a focused view of long-term drift — weight
+    loss/gain, gradually rising NH₃/CH₄, constipation patterns — without the
+    per-visit noise. Returns one row per cat in mild/significant/severe tier
+    with the firing channels and their z-scores. Computed fresh on every
+    call against the current data; no schema, no cache, no auto-rescore.
+    """
+    init_db()
+    with get_conn() as conn:
+        alarms = _scan_trend_alarms(conn)
+    if not alarms:
+        return "No trend alarms active — all registered cats look stable on the long-term view."
+    return "\n".join(_format_trend_alarms(alarms)).lstrip("\n")
 
 
 @tool
@@ -1108,4 +1211,5 @@ ALL_TOOLS = [
     plot_cat_history,
     eigen_report,
     get_trend_summary,
+    get_trending_cats,
 ]

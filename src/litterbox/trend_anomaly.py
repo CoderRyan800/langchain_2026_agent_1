@@ -356,12 +356,23 @@ def score_trends(
     for column, direction in _CHANNELS:
         recent_vals   = _fetch_visits_in_window(conn, cat_id, column, recent_iso_start, recent_iso_end)
         baseline_vals = _fetch_visits_in_window(conn, cat_id, column, baseline_iso_start, baseline_iso_end)
+        # Per-channel sample gates: a cat may meet the overall visit count
+        # while a specific sensor (NH₃, CH₄, weight, waste) is sparsely
+        # populated due to malfunction or being optional. The same
+        # min_visits_* gates apply per channel — without this, a channel
+        # with only 2 non-null readings could trip mild/significant/severe
+        # off a statistically meaningless sample.
+        channel_insufficient = (
+            len(recent_vals)   < min_visits_recent or
+            len(baseline_vals) < min_visits_baseline
+        )
         recent_stats   = _window_stats(recent_vals)
         baseline_stats = _window_stats(baseline_vals)
         z = _mean_shift_z(recent_stats, baseline_stats)
 
-        if (overall_insufficient or recent_stats is None
-                or baseline_stats is None or z is None):
+        if (overall_insufficient or channel_insufficient
+                or recent_stats is None or baseline_stats is None
+                or z is None):
             channels_out[column] = {
                 "recent":   recent_stats,
                 "baseline": baseline_stats,

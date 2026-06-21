@@ -218,6 +218,58 @@ def cat_with_baseline():
     return cat_id
 
 
+def _insert_visits_relative_to(
+    cat_id: int,
+    anchor: datetime,
+    days_ago_seq: list[float],
+    *,
+    weights: list[float] | None = None,
+    waste:   list[float] | None = None,
+    nh3:     list[float] | None = None,
+    ch4:     list[float] | None = None,
+) -> None:
+    """Variant of `_insert_visits` that anchors to an arbitrary timestamp
+    rather than the fixed REF_NOW. Used by auto-trigger tests that go
+    through the production tool entry points, which call score_trends
+    with a real `datetime.now()` — using REF_NOW for those would fail
+    once wall-clock time drifts past it.
+    """
+    n = len(days_ago_seq)
+    if weights is None: weights = [None] * n
+    if waste is None:   waste   = [None] * n
+    if nh3 is None:     nh3     = [None] * n
+    if ch4 is None:     ch4     = [None] * n
+    with get_conn() as conn:
+        for d, w, ws, a, m in zip(days_ago_seq, weights, waste, nh3, ch4):
+            t = (anchor - timedelta(days=d)).isoformat()
+            conn.execute(
+                "INSERT INTO visits (entry_time, confirmed_cat_id, tentative_cat_id, "
+                "  cat_weight_g, waste_weight_g, ammonia_peak_ppb, methane_peak_ppb) "
+                "VALUES (?, ?, NULL, ?, ?, ?, ?)",
+                (t, cat_id, w, ws, a, m),
+            )
+
+
+@pytest.fixture()
+def cat_with_baseline_realnow():
+    """Same as `cat_with_baseline` but anchored to wall-clock now(), so
+    tests that route through the production tools (which call score_trends
+    with real time) see the data in the live recent/baseline windows."""
+    cat_id = _insert_cat("Whiskers")
+    rng = random.Random(0)
+    anchor = datetime.now(timezone.utc)
+    days = [14 + i * 2.5 for i in range(30)]
+    weights = [5000 + rng.gauss(0, 50)        for _ in days]
+    waste   = [max(0, 80 + rng.gauss(0, 15))  for _ in days]
+    nh3     = [max(0, 40 + rng.gauss(0, 8))   for _ in days]
+    ch4     = [max(0, 20 + rng.gauss(0, 5))   for _ in days]
+    _insert_visits_relative_to(
+        cat_id, anchor, days,
+        weights=weights, waste=waste, nh3=nh3, ch4=ch4,
+    )
+    return cat_id, anchor
+
+
 class TestInsufficientData:
     def test_no_visits(self):
         cat_id = _insert_cat("Whiskers")
@@ -235,6 +287,90 @@ class TestInsufficientData:
         )
         out = score_trends(get_conn(), cat_id, now=REF_NOW)
         assert out["overall_tier"] == "insufficient_data"
+
+
+class TestSparseChannelGate:
+    def test_sparse_sensor_returns_insufficient(self):
+        """A cat with plenty of visits but a sparsely-populated sensor
+        channel must not trigger a tier alarm off two non-null readings.
+
+        Setup: 30 baseline + 10 recent visits (passes overall gate), but
+        only 2 of each window populate NH3. The NH3 channel must report
+        insufficient_data while the other channels score normally.
+        """
+        cat_id = _insert_cat("Sparse")
+        rng = random.Random(99)
+        baseline_days = [14 + i * 2.5 for i in range(30)]
+        recent_days   = [0.5 + i for i in range(10)]
+
+        baseline_weights = [5000 + rng.gauss(0, 50) for _ in baseline_days]
+        baseline_waste   = [max(0, 80 + rng.gauss(0, 15)) for _ in baseline_days]
+        baseline_ch4     = [max(0, 20 + rng.gauss(0, 5)) for _ in baseline_days]
+        # Only the first 2 of 30 baseline visits have a non-null NH3 reading,
+        # and they happen to be very high — a working detector must NOT
+        # convert this to a "stable baseline" the recent window can shift
+        # against.
+        baseline_nh3 = [200.0, 210.0] + [None] * 28
+
+        # Recent: 10 visits, only 2 have non-null NH3, both also very high.
+        # If the per-channel gate is missing, the detector compares two
+        # high recent points against two high baseline points and may
+        # produce a confident verdict from a 2-vs-2 comparison.
+        recent_weights = [5000 + rng.gauss(0, 50) for _ in recent_days]
+        recent_waste   = [max(0, 80 + rng.gauss(0, 15)) for _ in recent_days]
+        recent_ch4     = [max(0, 20 + rng.gauss(0, 5)) for _ in recent_days]
+        recent_nh3     = [300.0, 320.0] + [None] * 8
+
+        _insert_visits(
+            cat_id, baseline_days,
+            weights=baseline_weights, waste=baseline_waste,
+            nh3=baseline_nh3, ch4=baseline_ch4,
+        )
+        _insert_visits(
+            cat_id, recent_days,
+            weights=recent_weights, waste=recent_waste,
+            nh3=recent_nh3, ch4=recent_ch4,
+        )
+
+        out = score_trends(get_conn(), cat_id, now=REF_NOW)
+        # Sparse NH3 must not alarm — explicitly insufficient_data.
+        nh3 = out["channels"]["ammonia_peak_ppb"]
+        assert nh3["tier"] == "insufficient_data", (
+            f"sparse NH3 channel produced tier={nh3['tier']} "
+            f"z={nh3.get('z_score')} from {len(recent_nh3) - recent_nh3.count(None)} "
+            f"recent vs {len(baseline_nh3) - baseline_nh3.count(None)} baseline non-null samples"
+        )
+        # Other (fully-populated) channels should still score — gate is
+        # per-channel, not all-or-nothing.
+        assert out["channels"]["cat_weight_g"]["tier"] != "insufficient_data"
+        assert out["channels"]["methane_peak_ppb"]["tier"] != "insufficient_data"
+
+    def test_per_channel_gate_uses_min_visits_thresholds(self):
+        """Channel with exactly (min_visits_recent - 1) non-null recent
+        samples must be insufficient_data even if baseline is fully
+        populated.
+        """
+        cat_id = _insert_cat("EdgeCase")
+        # Start baseline at day 15 (not 14) to avoid the recent_start
+        # boundary: a visit at exactly day 14 satisfies entry_time >=
+        # recent_iso_start and would leak into the recent window.
+        baseline_days = [15 + i * 2.5 for i in range(30)]
+        recent_days   = [0.5 + i for i in range(10)]
+        # 4 NH3 readings recent (< default min_visits_recent=5)
+        recent_nh3 = [80.0, 82.0, 78.0, 81.0] + [None] * 6
+        baseline_nh3 = [40.0 + (i % 5) for i in range(30)]
+        _insert_visits(
+            cat_id, baseline_days,
+            weights=[5000] * 30, waste=[80] * 30,
+            nh3=baseline_nh3, ch4=[20] * 30,
+        )
+        _insert_visits(
+            cat_id, recent_days,
+            weights=[5000] * 10, waste=[80] * 10,
+            nh3=recent_nh3, ch4=[20] * 10,
+        )
+        out = score_trends(get_conn(), cat_id, now=REF_NOW)
+        assert out["channels"]["ammonia_peak_ppb"]["tier"] == "insufficient_data"
 
 
 class TestStableCatStaysQuiet:
@@ -417,21 +553,22 @@ class TestAutoTriggerScan:
         with get_conn() as conn:
             assert _scan_trend_alarms(conn) == []
 
-    def test_stable_cat_does_not_appear(self, cat_with_baseline):
-        # cat_with_baseline has only baseline visits, no recent → insufficient_data
-        # which means the cat should NOT appear in trend alarms.
+    def test_stable_cat_does_not_appear(self, cat_with_baseline_realnow):
+        # cat_with_baseline_realnow has only baseline visits, no recent →
+        # insufficient_data, so the cat should NOT appear in trend alarms.
         from litterbox.tools import _scan_trend_alarms
         with get_conn() as conn:
             alarms = _scan_trend_alarms(conn)
         cat_names = [a["cat_name"] for a in alarms]
         assert "Whiskers" not in cat_names
 
-    def test_weight_loss_cat_appears(self, cat_with_baseline):
+    def test_weight_loss_cat_appears(self, cat_with_baseline_realnow):
+        cat_id, anchor = cat_with_baseline_realnow
         rng = random.Random(42)
         days_recent = [0.5 + i for i in range(10)]
         # 12% drop is firmly in significant pct + huge z-score → severe
-        _insert_visits(
-            cat_with_baseline, days_recent,
+        _insert_visits_relative_to(
+            cat_id, anchor, days_recent,
             weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
             waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
         )
@@ -451,11 +588,12 @@ class TestGetTrendingCatsTool:
         result = get_trending_cats.invoke({})
         assert "No trend alarms" in result
 
-    def test_trending_cat_listed(self, cat_with_baseline):
+    def test_trending_cat_listed(self, cat_with_baseline_realnow):
+        cat_id, anchor = cat_with_baseline_realnow
         rng = random.Random(43)
         days_recent = [0.5 + i for i in range(10)]
-        _insert_visits(
-            cat_with_baseline, days_recent,
+        _insert_visits_relative_to(
+            cat_id, anchor, days_recent,
             weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
             waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
         )
@@ -467,12 +605,13 @@ class TestGetTrendingCatsTool:
 
 
 class TestGetAnomalousVisitsAutoSurfacesTrends:
-    def test_trend_alarms_appended(self, cat_with_baseline):
+    def test_trend_alarms_appended(self, cat_with_baseline_realnow):
+        cat_id, anchor = cat_with_baseline_realnow
         # No per-visit anomalies, but a clearly trending cat.
         rng = random.Random(44)
         days_recent = [0.5 + i for i in range(10)]
-        _insert_visits(
-            cat_with_baseline, days_recent,
+        _insert_visits_relative_to(
+            cat_id, anchor, days_recent,
             weights=[4400 + rng.gauss(0, 50) for _ in days_recent],
             waste=[80] * 10, nh3=[40] * 10, ch4=[20] * 10,
         )

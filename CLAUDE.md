@@ -59,9 +59,9 @@ python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 649 tests, ~52 s
+pytest -m "not slow"    # 650 tests, ~52 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 669 tests
+pytest                  # all 670 tests
 ```
 
 Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free; phases 2, 3, 5, 7, 8 may make real model calls. The manual runner uses isolated paths under `tests/test_data/` to avoid touching production data.

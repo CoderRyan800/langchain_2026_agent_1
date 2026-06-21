@@ -12,6 +12,7 @@ Run only these tests with::
 """
 
 import uuid
+from pathlib import Path
 
 import pytest
 from PIL import Image
@@ -45,6 +46,16 @@ def green_image(tmp_path) -> str:
     path = tmp_path / "green.jpg"
     img.save(str(path), "JPEG")
     return str(path)
+
+
+@pytest.fixture()
+def marina_reference_image() -> str:
+    return str(Path(__file__).parent.parent / "simulator/cat_pictures/Marina/IMG_7193.jpeg")
+
+
+@pytest.fixture()
+def natasha_image() -> str:
+    return str(Path(__file__).parent.parent / "simulator/cat_pictures/Natasha/IMG_7998.jpeg")
 
 
 # ---------------------------------------------------------------------------
@@ -144,10 +155,10 @@ class TestSimilarityScores:
         _, _, score, _ = find_candidates(brown_image)[0]
         assert score > 0.99
 
-    def test_different_image_below_threshold(self, brown_image, blue_image):
+    def test_different_cat_photo_below_threshold(self, marina_reference_image, natasha_image):
         from litterbox.embeddings import add_to_index, find_candidates, ID_THRESHOLD
-        add_to_index(str(uuid.uuid4()), brown_image, "Whiskers", 1)
-        _, _, score, _ = find_candidates(blue_image)[0]
+        add_to_index(str(uuid.uuid4()), marina_reference_image, "Marina", 1)
+        _, _, score, _ = find_candidates(natasha_image)[0]
         assert score < ID_THRESHOLD
 
     def test_scores_are_between_minus_one_and_one(self, brown_image, blue_image):

@@ -393,9 +393,9 @@ etc.
 ### Run the tests
 
 ```bash
-pytest -m "not slow"     # 649 tests, ~52 seconds
+pytest -m "not slow"     # 650 tests, ~52 seconds
 pytest -m slow           # CLIP embedding tests, ~minute (downloads model first time)
-pytest                   # all 669 tests
+pytest                   # all 670 tests
 ```
 
 Automated pytest tests use isolated tmp directories. The manual integration

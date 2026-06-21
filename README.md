@@ -84,7 +84,7 @@ python src/litterbox_agent.py --event exit --image images/captures/exit.jpg \
 
 ```bash
 # Automated pytest (no LLM calls — fast)
-pytest -m "not slow"                          # 649 tests, ~52 s
+pytest -m "not slow"                          # 650 tests, ~52 s
 pytest -m slow                                # CLIP embedding tests (downloads ~350 MB model once)
 
 # Manual integration test runner (uses real LLM API calls)

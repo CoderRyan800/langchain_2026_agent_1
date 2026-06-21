@@ -1,4 +1,5 @@
 import base64
+import logging
 import mimetypes
 import shutil
 import uuid
@@ -17,6 +18,7 @@ from litterbox.gas_anomaly import score_gas_visit, ALARM_TIERS
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 IMAGES_DIR = PROJECT_ROOT / "images"
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -722,6 +724,11 @@ def _scan_trend_alarms(conn) -> list[dict]:
         try:
             result = score_trends(conn, cat_id=cat["cat_id"])
         except Exception:
+            logger.exception(
+                "Trend alarm scan failed for cat_id=%s name=%r",
+                cat["cat_id"],
+                cat["name"],
+            )
             continue
         if result["overall_tier"] not in ALARM_TIERS:
             continue
@@ -785,7 +792,6 @@ def get_anomalous_visits() -> str:
     with the channels currently firing — this is the auto-trigger surface
     for the trend detector and is computed fresh on every call against the
     latest data."""
-    from litterbox.trend_anomaly import score_trends, ALARM_TIERS  # noqa: F401  (used by helper)
 
     init_db()
     with get_conn() as conn:

@@ -581,6 +581,44 @@ class TestAutoTriggerScan:
         firing_channels = {f["channel"] for f in whiskers["firing"]}
         assert "cat_weight_g" in firing_channels
 
+    def test_scoring_exception_is_logged_and_other_cats_continue(self, caplog, monkeypatch):
+        import logging
+
+        import litterbox.trend_anomaly as trend_mod
+        from litterbox.tools import _scan_trend_alarms
+
+        with get_conn() as conn:
+            bad_id = conn.execute("INSERT INTO cats (name) VALUES ('BadData')").lastrowid
+            good_id = conn.execute("INSERT INTO cats (name) VALUES ('StableEnough')").lastrowid
+
+        def fake_score_trends(conn, cat_id, **kwargs):
+            if cat_id == bad_id:
+                raise RuntimeError("malformed trend row")
+            assert cat_id == good_id
+            return {
+                "overall_tier": "mild",
+                "recent_window": {"n_visits": 5},
+                "baseline_window": {"n_visits": 10},
+                "channels": {
+                    "cat_weight_g": {
+                        "tier": "mild",
+                        "z_score": -2.5,
+                        "pct_change": -0.06,
+                        "constipation": {"flagged": False},
+                    }
+                },
+            }
+
+        monkeypatch.setattr(trend_mod, "score_trends", fake_score_trends)
+
+        with caplog.at_level(logging.ERROR, logger="litterbox.tools"):
+            with get_conn() as conn:
+                alarms = _scan_trend_alarms(conn)
+
+        assert [a["cat_name"] for a in alarms] == ["StableEnough"]
+        assert "Trend alarm scan failed for cat_id" in caplog.text
+        assert "BadData" in caplog.text
+
 
 class TestGetTrendingCatsTool:
     def test_no_alarms_message_when_empty(self):

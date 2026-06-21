@@ -65,43 +65,49 @@ def _entry(offset: float, values: dict) -> dict:
 class TestChipIdPriority:
     """Chip-based identification takes priority over similarity."""
 
-    def test_chip_id_present(self):
-        """A non-null chip_id in the visit window → is_confirmed=True."""
+    def test_chip_id_present(self, registered_cat):
+        """A simulator cat-name chip value records a tentative chip result."""
+        cat_id, cat_name = registered_cat
         config = _make_config()
         analyser = VisitAnalyser(config)
 
         snapshot = [
             _entry(0, {"weight_g": 5000}),
-            _entry(5, {"weight_g": 5500, "chip_id": "Whiskers"}),
-            _entry(10, {"weight_g": 5500, "chip_id": "Whiskers"}),
+            _entry(5, {"weight_g": 5500, "chip_id": cat_name}),
+            _entry(10, {"weight_g": 5500, "chip_id": cat_name}),
             _entry(15, {"weight_g": 5000}),
         ]
 
         record = analyser.analyse(snapshot, _ts(0), _ts(15))
 
         assert record.id_method == "chip"
-        assert record.chip_id == "Whiskers"
-        assert record.is_confirmed is True
+        assert record.chip_id == cat_name
+        assert record.tentative_cat_id == cat_id
+        assert record.confirmed_cat_id is None
+        assert record.is_confirmed is False
 
-    def test_multiple_chip_ids_most_frequent_wins(self):
+    def test_multiple_chip_ids_most_frequent_wins(self, registered_cat):
         """When multiple chip_ids appear, the most frequent one wins."""
+        cat_id, cat_name = registered_cat
         config = _make_config()
         analyser = VisitAnalyser(config)
 
         snapshot = [
-            _entry(0, {"chip_id": "Luna"}),
-            _entry(5, {"chip_id": "Luna"}),
+            _entry(0, {"chip_id": cat_name}),
+            _entry(5, {"chip_id": cat_name}),
             _entry(10, {"chip_id": "Anna"}),
-            _entry(15, {"chip_id": "Luna"}),
+            _entry(15, {"chip_id": cat_name}),
         ]
 
         record = analyser.analyse(snapshot, _ts(0), _ts(15))
 
-        assert record.chip_id == "Luna"
-        assert record.is_confirmed is True
+        assert record.chip_id == cat_name
+        assert record.tentative_cat_id == cat_id
+        assert record.confirmed_cat_id is None
+        assert record.is_confirmed is False
 
     def test_chip_id_looks_up_cat(self, registered_cat):
-        """Chip ID matching a registered cat populates cat_id fields."""
+        """Cat-name fallback populates tentative ID but does not confirm."""
         cat_id, cat_name = registered_cat
         config = _make_config()
         analyser = VisitAnalyser(config)
@@ -114,11 +120,73 @@ class TestChipIdPriority:
         record = analyser.analyse(snapshot, _ts(0), _ts(5))
 
         assert record.tentative_cat_id == cat_id
+        assert record.confirmed_cat_id is None
+        assert record.is_confirmed is False
+
+    def test_hardware_chip_id_looks_up_registered_mapping(self, registered_cat):
+        """Raw RFID values map through cats.chip_id before confirmation."""
+        from litterbox.db import get_conn
+
+        cat_id, _ = registered_cat
+        raw_chip = "985121054001"
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE cats SET chip_id = ? WHERE cat_id = ?",
+                (raw_chip, cat_id),
+            )
+
+        config = _make_config()
+        analyser = VisitAnalyser(config)
+        snapshot = [
+            _entry(0, {"chip_id": raw_chip}),
+            _entry(5, {"chip_id": raw_chip}),
+        ]
+
+        record = analyser.analyse(snapshot, _ts(0), _ts(5))
+
+        assert record.chip_id == raw_chip
+        assert record.tentative_cat_id == cat_id
         assert record.confirmed_cat_id == cat_id
         assert record.is_confirmed is True
 
+    def test_analyse_migrates_old_cats_table_before_chip_lookup(self, tmp_path, monkeypatch):
+        """Old DBs missing cats.chip_id are migrated before chip lookup."""
+        import sqlite3
+
+        import litterbox.db as db_mod
+
+        old_db = tmp_path / "old_analyser.db"
+        monkeypatch.setattr(db_mod, "DB_PATH", old_db)
+
+        conn = sqlite3.connect(str(old_db))
+        conn.executescript("""
+            CREATE TABLE cats (
+                cat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+            INSERT INTO cats (name) VALUES ('Whiskers');
+        """)
+        conn.commit()
+        conn.close()
+
+        config = _make_config()
+        analyser = VisitAnalyser(config)
+        snapshot = [
+            _entry(0, {"chip_id": "Whiskers"}),
+        ]
+
+        record = analyser.analyse(snapshot, _ts(0), _ts(0))
+
+        assert record.tentative_cat_id == 1
+        assert record.confirmed_cat_id is None
+        assert record.is_confirmed is False
+        with db_mod.get_conn() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(cats)")}
+        assert "chip_id" in cols
+
     def test_chip_id_unregistered_cat(self):
-        """Chip ID for an unregistered cat: is_confirmed=True but cat_id=None."""
+        """Chip ID for an unregistered cat stays unconfirmed for review."""
         config = _make_config()
         analyser = VisitAnalyser(config)
 
@@ -129,7 +197,8 @@ class TestChipIdPriority:
         record = analyser.analyse(snapshot, _ts(0), _ts(0))
 
         assert record.chip_id == "UnknownCat"
-        assert record.is_confirmed is True
+        assert record.id_method == "chip"
+        assert record.is_confirmed is False
         assert record.tentative_cat_id is None
         assert record.confirmed_cat_id is None
 
@@ -232,6 +301,21 @@ class TestSimilarityAnalysis:
         assert record.top_similarity is not None
         assert record.top_similarity > 0.80
 
+    def test_all_nan_similarity_window_returns_unknown(self):
+        """All-NaN similarity columns degrade to Unknown instead of raising."""
+        config = _make_config(sim_entry_threshold=0.70, sustained_peak_samples=2)
+        analyser = VisitAnalyser(config)
+
+        snapshot = [
+            _entry(0, {"similarity_anna": None, "similarity_luna": None}),
+            _entry(5, {"similarity_anna": None, "similarity_luna": None}),
+        ]
+
+        record = analyser.analyse(snapshot, _ts(0), _ts(5))
+
+        assert record.id_method == "unknown"
+        assert record.tentative_cat_id is None
+
     def test_similarity_looks_up_cat(self, registered_cat):
         """Winning similarity cat matching a registered cat populates tentative_cat_id."""
         cat_id, cat_name = registered_cat
@@ -331,16 +415,24 @@ class TestSave:
         assert td_visit_id > 0
         assert record.td_visit_id == td_visit_id
 
-    def test_save_round_trip(self):
+    def test_save_round_trip(self, registered_cat):
         """Values stored by save() can be read back from the DB."""
         from litterbox.db import get_conn
+
+        cat_id, _ = registered_cat
+        raw_chip = "985121054001"
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE cats SET chip_id = ? WHERE cat_id = ?",
+                (raw_chip, cat_id),
+            )
 
         config = _make_config()
         analyser = VisitAnalyser(config)
 
         snapshot = [
-            _entry(0, {"weight_g": 5000, "chip_id": "TestCat"}),
-            _entry(5, {"weight_g": 5500, "chip_id": "TestCat"}),
+            _entry(0, {"weight_g": 5000, "chip_id": raw_chip}),
+            _entry(5, {"weight_g": 5500, "chip_id": raw_chip}),
         ]
         record = analyser.analyse(snapshot, _ts(0), _ts(5))
         td_visit_id = analyser.save(record)
@@ -353,7 +445,7 @@ class TestSave:
 
         assert row is not None
         assert row["id_method"] == "chip"
-        assert row["chip_id"] == "TestCat"
+        assert row["chip_id"] == raw_chip
         assert row["is_confirmed"] == 1  # SQLite stores bool as int
         assert row["snapshot_json"] is not None
 

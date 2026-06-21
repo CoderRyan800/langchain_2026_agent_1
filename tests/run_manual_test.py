@@ -10,22 +10,25 @@ Usage:
     python tests/run_manual_test.py --phase 1 2  # specific phases only
     python tests/run_manual_test.py --no-cleanup # keep tests/test_data/ after run
 
+Phase 5 requires the package to be installed so the `litterbox-agent` console
+script exists. Run `pip install -e .` in the active environment first.
+
 Phases:
     1 — Storage layer and tools        (no LLM calls)
     2 — CLIP embeddings + ID pipeline  (1–2 GPT-4o calls)
     3 — Health analysis                (4 GPT-4o calls)
     4 — Identity confirmation          (no LLM calls)
-    5 — Sensor CLI subprocess          (2–3 GPT-4o calls, writes to production data/)
+    5 — Sensor CLI subprocess          (1–2 GPT-4o calls, isolated test data/)
     6 — Reset and fresh-state check    (no LLM calls)
     7 — Retroactive recognition        (1–2 GPT-4o calls)
     8 — Additional sensor data         (1–2 GPT-4o calls)
 
 Estimated API cost for a full run: ~$0.25–0.50
-Phase 5 writes a small number of records to the production data/litterbox.db.
-All other phases use an isolated test database and Chroma index.
+All phases use isolated test databases, Chroma indexes, and image directories.
 """
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -42,6 +45,8 @@ TEST_DB       = TEST_DATA / "litterbox_test.db"
 TEST_CHROMA   = TEST_DATA / "chroma_test"
 TEST_IMGS     = TEST_DATA / "images"
 TEST_CAPTURES = TEST_DATA / "captures"
+TEST_CLI_DATA = TEST_DATA / "cli_data"
+TEST_CLI_IMGS = TEST_DATA / "cli_images"
 
 from dotenv import load_dotenv
 load_dotenv(PROJECT_ROOT / ".env")
@@ -492,27 +497,45 @@ def phase4() -> None:
 
 # ── Phase 5: end-to-end sensor CLI ────────────────────────────────────────────
 def phase5() -> None:
-    section("Phase 5 — Sensor CLI subprocess  (2–3 GPT-4o calls, uses production data/)")
-    note("This phase writes records to the production data/litterbox.db.")
-    note("Those records will have Unknown tentative IDs (no cats in production DB yet).")
+    section("Phase 5 — Sensor CLI subprocess  (1–2 GPT-4o calls, isolated data)")
+    note("This phase exercises the installed litterbox-agent console script with isolated directories.")
 
     cat_a       = str(TEST_CAPTURES / "cat_a.jpg")
     litter_exit = str(TEST_CAPTURES / "litter_exit_clean.jpg")
-    agent       = str(PROJECT_ROOT / "src" / "litterbox_agent.py")
-    py          = sys.executable
 
-    # Ensure production data/ exists
-    (PROJECT_ROOT / "data").mkdir(parents=True, exist_ok=True)
+    cli = Path(sys.executable).with_name("litterbox-agent")
+    if not cli.exists():
+        found = shutil.which("litterbox-agent")
+        cli = Path(found) if found else cli
+    if not cli.exists():
+        fail(
+            "5.0 — litterbox-agent console script is installed",
+            "Run `pip install -e .` in this Python environment before Phase 5.",
+        )
+        return
+
+    if TEST_CLI_DATA.exists():
+        shutil.rmtree(TEST_CLI_DATA)
+    if TEST_CLI_IMGS.exists():
+        shutil.rmtree(TEST_CLI_IMGS)
+    TEST_CLI_DATA.mkdir(parents=True, exist_ok=True)
+    TEST_CLI_IMGS.mkdir(parents=True, exist_ok=True)
 
     def run(*args: str, timeout: int = 120) -> subprocess.CompletedProcess:
+        env = dict(os.environ)
         return subprocess.run(
-            [py, agent, *args],
+            [
+                str(cli),
+                "--data-dir", str(TEST_CLI_DATA),
+                "--images-dir", str(TEST_CLI_IMGS),
+                *args,
+            ],
             capture_output=True, text=True,
-            timeout=timeout, cwd=str(PROJECT_ROOT),
+            timeout=timeout, cwd=str(PROJECT_ROOT), env=env,
         )
 
     # 5.1 Entry event ─────────────────────────────────────────────────────────────
-    note("Running: --event entry  (GPT-4o call)…")
+    note("Running console entry: --event entry …")
     r1 = run("--event", "entry", "--image", cat_a)
     check(r1.returncode == 0,
           "5.1a — --event entry exits 0",
@@ -884,7 +907,7 @@ if __name__ == "__main__":
             "  2 — CLIP embeddings + ID     (1–2 GPT-4o calls)\n"
             "  3 — Health analysis          (4 GPT-4o calls)\n"
             "  4 — Identity confirmation    (no LLM)\n"
-            "  5 — Sensor CLI subprocess    (2–3 GPT-4o calls)\n"
+            "  5 — Sensor CLI subprocess    (1–2 GPT-4o calls, isolated data)\n"
             "  6 — Reset + fresh-state      (no LLM)\n"
             "  7 — Retroactive recognition  (1–2 GPT-4o calls)\n"
             "  8 — Additional sensor data   (1–2 GPT-4o calls)\n"

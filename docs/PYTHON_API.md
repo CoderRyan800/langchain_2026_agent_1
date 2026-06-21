@@ -117,6 +117,10 @@ agent = LitterboxAgent(
 )
 ```
 
+Path overrides are process-global in the current implementation. Do not keep
+two differently configured `LitterboxAgent` instances active at the same time
+in one process; close one before switching to another data/image store.
+
 ### Example with an API key in code
 
 ```python
@@ -216,11 +220,15 @@ Returns a summary of all registered cats and their reference image counts.
 ### `confirm_identity`
 
 ```python
-result: str = agent.confirm_identity(visit_id: int, cat_name: str)
+result: str = agent.confirm_identity(visit_id: int | str, cat_name: str)
 ```
 
-Permanently sets the confirmed cat identity for a visit.  Use this after
-reviewing unconfirmed visits.
+Permanently sets the confirmed cat identity for a visit. Use an integer for
+classic image visits and a `td:<id>` string for time-domain visits listed by
+`get_unconfirmed_visits()`. When a `td:` visit has a raw `chip_id`,
+confirmation stores that chip on the confirmed cat if no conflicting mapping
+exists and the chip value is not a registered cat name, so later visits with a
+real chip can auto-confirm.
 
 ```python
 # Check what needs confirmation
@@ -228,6 +236,9 @@ print(agent.get_unconfirmed_visits())
 
 # Confirm visit #7 is Whiskers
 print(agent.confirm_identity(7, "Whiskers"))
+
+# Confirm time-domain visit td:4 is Luna
+print(agent.confirm_identity("td:4", "Luna"))
 ```
 
 ### `retroactive_recognition`
@@ -257,7 +268,7 @@ All query methods call the database tools directly — no LLM is involved.
 | `get_visits_by_date(date_str)` | `"YYYY-MM-DD"` | All visits on the given date |
 | `get_visits_by_cat(cat_name)` | cat name | All visits for that cat |
 | `get_anomalous_visits()` | — | All visits flagged as anomalous |
-| `get_unconfirmed_visits()` | — | Visits with tentative (unconfirmed) IDs |
+| `get_unconfirmed_visits()` | — | Classic and time-domain visits with tentative (unconfirmed) IDs |
 | `get_visit_images(visit_id)` | visit number | Entry and exit image paths |
 
 ```python
@@ -411,10 +422,10 @@ if __name__ == "__main__":
 After installation the following commands are available in your PATH:
 
 ```bash
-# Interactive litter box agent (equivalent to python src/litterbox_agent.py)
+# Direct-API console command
 litterbox-agent
 
-# Sensor-triggered events
+# Sensor-triggered events use direct API calls and support custom directories
 litterbox-agent --event entry --image /path/to/entry.jpg
 litterbox-agent --event exit  --image /path/to/exit.jpg \
     --weight-exit 5489 --ammonia-peak 62

@@ -1,6 +1,6 @@
 # Test Report — LitterboxAgent Python API
 
-> **Historical artifact (2026-03-28).** The counts, tool inventory ("11 tools"), and bug-fix list below describe the API as it was on the date above. The current tool count is **14** (`get_visit_details`, `plot_cat_history`, and `eigen_report` were added afterward); see `CLAUDE.md` for the present picture. Preserved here for the historical record of the API regression hunt.
+> **Historical artifact (2026-03-28).** The original tool inventory ("11 tools") and bug-fix list below describe the API as it was on the date above. The current tool count is **16**; see `CLAUDE.md` for the present picture. Preserved here for the historical record of the API regression hunt.
 
 **Date:** 2026-03-28
 **Environment:** `langchain_env_2026_1` (Python 3.12.12, pytest 9.0.2)
@@ -13,15 +13,15 @@
 
 | Metric | Value |
 |---|---|
-| Tests in `test_api.py` | **87** |
-| Passed | **87** |
+| Tests in `test_api.py` | **88** |
+| Passed | **88** |
 | Failed | **0** |
 | Errors | **0** |
 | Execution time | **7.95 s** |
 | LLM / API calls made | **0** (all mocked) |
 | Regressions in existing suite | **0** (267 / 267 passing) |
 
-All 87 tests pass. No production data was touched; every test runs against isolated temporary directories.
+All 88 API tests pass. No production data was touched; every test runs against isolated temporary directories.
 
 ---
 
@@ -81,7 +81,7 @@ Verifies the constructor's side effects before any tool is called.
 | `test_patches_images_dir` | `litterbox.tools.IMAGES_DIR` is overwritten to the agent's images dir |
 | `test_patches_chroma_path` | `litterbox.embeddings.CHROMA_PATH` is overwritten |
 | `test_resets_chroma_collection_singleton` | `_collection` is set to `None` so Chroma re-initialises at the new path |
-| `test_db_schema_initialised` | All four tables (`cats`, `cat_images`, `visits`, `visit_sensor_events`) exist after construction |
+| `test_db_schema_initialised` | The legacy core tables (`cats`, `cat_images`, `visits`, `visit_sensor_events`) exist after construction |
 
 ---
 

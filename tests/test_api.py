@@ -830,6 +830,36 @@ class TestQuery:
         # Both tool output and AI message should appear
         assert "2 visits" in result or "Found" in result
 
+    def test_query_omits_prior_thread_history(self, agent, monkeypatch):
+        from langchain.messages import AIMessage, HumanMessage, ToolMessage
+
+        class _FakeAgent:
+            def invoke(self, input_dict, config=None):
+                return {
+                    "messages": [
+                        HumanMessage(content="old question"),
+                        ToolMessage(
+                            content="old tool output",
+                            tool_call_id="old-tool-id",
+                        ),
+                        AIMessage(content="old answer"),
+                        HumanMessage(content="current question"),
+                        ToolMessage(
+                            content="current tool output",
+                            tool_call_id="current-tool-id",
+                        ),
+                        AIMessage(content="current answer"),
+                    ]
+                }
+
+        monkeypatch.setattr(agent, "_get_agent", lambda: _FakeAgent())
+        result = agent.query("current question")
+
+        assert "current tool output" in result
+        assert "current answer" in result
+        assert "old tool output" not in result
+        assert "old answer" not in result
+
 
 # ---------------------------------------------------------------------------
 # 15. Full sensor round-trip

@@ -190,13 +190,13 @@ class ChipIdDriver(BaseDriver):
     """Driver for an RFID/NFC microchip reader.
 
     Production: reads the chip reader over serial or USB HID.  Returns the
-    cat's registered chip ID string when a chip is in range, or ``None`` when
-    no chip is detected.
+    raw registered chip ID string when a chip is in range, or ``None`` when no
+    chip is detected. ``VisitAnalyser`` maps raw chip IDs via ``cats.chip_id``.
 
     Parameters
     ----------
     cat_name:
-        The chip ID string to return on every ``read()`` call.
+        The chip ID or cat-name string to return on every ``read()`` call.
         Pass ``None`` to simulate "no chip in range".
     """
 

@@ -214,7 +214,7 @@ class VisitTrigger:
             # Compute (or refresh) the baseline from the buffer at this moment.
             # We do this on every ABSENT tick so the baseline stays current
             # even during long idle periods.
-            bw = self._compute_baseline_weight()
+            bw = self._compute_baseline_weight(current_weight=weight)
             if bw is not None:
                 self._baseline_weight = bw
                 if weight > bw + self._weight_entry_delta:
@@ -322,16 +322,30 @@ class VisitTrigger:
     # Baseline weight helper
     # ------------------------------------------------------------------
 
-    def _compute_baseline_weight(self) -> Optional[float]:
-        """Return the median of all available weight readings in the buffer.
+    def _compute_baseline_weight(
+        self,
+        current_weight: Optional[float] = None,
+    ) -> Optional[float]:
+        """Return the median of prior weight readings in the buffer.
 
-        Uses the full buffer so that even a sparse window (few samples) gives
-        a reasonable estimate.  Returns ``None`` if no weight readings exist
-        in the buffer yet.
+        ``SensorCollector`` appends the current sample before calling
+        ``check()``.  When the newest buffer sample is the same weight value
+        currently being evaluated, exclude it so a sparse buffer does not fold
+        the possible entry spike into its own baseline.  Returns ``None`` if no
+        prior weight readings exist.
         """
+        entries = self._buffer.snapshot()
+        if (
+            current_weight is not None
+            and entries
+            and entries[-1]["values"].get("weight_g") == current_weight
+        ):
+            entries = entries[:-1]
+
         weights = [
-            v for v in self._buffer.get_channel("weight_g")
-            if v is not None
+            entry["values"].get("weight_g")
+            for entry in entries
+            if entry["values"].get("weight_g") is not None
         ]
         if not weights:
             return None

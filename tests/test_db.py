@@ -27,7 +27,7 @@ class TestSchema:
         from litterbox.db import get_conn
         with get_conn() as conn:
             cols = {r[1] for r in conn.execute("PRAGMA table_info(cats)")}
-        assert {"cat_id", "name", "created_at"} <= cols
+        assert {"cat_id", "name", "chip_id", "created_at"} <= cols
 
     def test_cat_images_columns(self):
         from litterbox.db import get_conn
@@ -158,6 +158,31 @@ class TestMigration:
             col_names = [r[1] for r in conn.execute("PRAGMA table_info(visits)")]
         assert len(col_names) == len(set(col_names))
 
+    def test_chip_id_column_added_to_old_cats_table(self, tmp_path, monkeypatch):
+        import litterbox.db as db_mod
+
+        old_db = tmp_path / "old_cats.db"
+        monkeypatch.setattr(db_mod, "DB_PATH", old_db)
+
+        conn = sqlite3.connect(str(old_db))
+        conn.executescript("""
+            CREATE TABLE cats (
+                cat_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT UNIQUE NOT NULL,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            );
+        """)
+        conn.commit()
+        conn.close()
+
+        from litterbox.db import init_db, get_conn
+        init_db()
+
+        with get_conn() as conn:
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(cats)")}
+
+        assert "chip_id" in cols
+
 
 # ---------------------------------------------------------------------------
 # Constraints
@@ -171,6 +196,18 @@ class TestConstraints:
         with pytest.raises(Exception):
             with get_conn() as conn:
                 conn.execute("INSERT INTO cats (name) VALUES ('UniqueKitty')")
+
+    def test_cats_chip_id_unique_when_present(self):
+        from litterbox.db import get_conn
+        with get_conn() as conn:
+            conn.execute(
+                "INSERT INTO cats (name, chip_id) VALUES ('ChipA', '985121054001')"
+            )
+        with pytest.raises(Exception):
+            with get_conn() as conn:
+                conn.execute(
+                    "INSERT INTO cats (name, chip_id) VALUES ('ChipB', '985121054001')"
+                )
 
     def test_foreign_key_visit_rejects_bad_cat_id(self):
         from litterbox.db import get_conn

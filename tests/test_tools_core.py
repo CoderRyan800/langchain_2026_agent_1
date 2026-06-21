@@ -7,6 +7,8 @@ These tests mock _identify_cat where needed (via a class-level autouse fixture)
 so the CLIP model is never loaded.
 """
 
+from datetime import datetime, timezone
+
 import pytest
 from litterbox.db import get_conn
 
@@ -199,6 +201,194 @@ class TestConfirmIdentity:
         result = confirm_identity.invoke({"visit_id": open_visit, "cat_name": cat_name})
         assert cat_name in result
 
+    def test_confirms_time_domain_visit_with_prefixed_id(self, registered_cat):
+        from litterbox.tools import confirm_identity
+        cat_id, cat_name = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           'raw-chip-001', FALSE, 'chip', '[]')"""
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+
+        assert "td:" in result
+        assert "confirmed" in result.lower()
+        with get_conn() as conn:
+            row = conn.execute(
+                """SELECT tentative_cat_id, confirmed_cat_id, is_confirmed
+                   FROM td_visits WHERE td_visit_id = ?""",
+                (td_visit_id,),
+            ).fetchone()
+        assert row["tentative_cat_id"] == cat_id
+        assert row["confirmed_cat_id"] == cat_id
+        assert bool(row["is_confirmed"])
+
+    def test_confirming_time_domain_chip_visit_learns_chip_mapping(self, registered_cat):
+        from litterbox.tools import confirm_identity
+        from litterbox.visit_analyser import VisitAnalyser
+
+        cat_id, cat_name = registered_cat
+        raw_chip = "raw-chip-001"
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           ?, FALSE, 'chip', '[]')""",
+                (raw_chip,),
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+
+        assert "confirmed" in result.lower()
+        with get_conn() as conn:
+            cat = conn.execute(
+                "SELECT chip_id FROM cats WHERE cat_id = ?",
+                (cat_id,),
+            ).fetchone()
+        assert cat["chip_id"] == raw_chip
+
+        ts = datetime(2026, 1, 1, 8, 10, tzinfo=timezone.utc)
+        record = VisitAnalyser({"trigger": {}}).analyse(
+            [{"timestamp": ts, "values": {"chip_id": raw_chip}}],
+            ts,
+            ts,
+        )
+        assert record.tentative_cat_id == cat_id
+        assert record.confirmed_cat_id == cat_id
+        assert record.is_confirmed is True
+
+    def test_confirming_time_domain_name_fallback_does_not_learn_chip(self, registered_cat):
+        from litterbox.tools import confirm_identity
+        from litterbox.visit_analyser import VisitAnalyser
+
+        cat_id, cat_name = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           ?, FALSE, 'chip', '[]')""",
+                (cat_name,),
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+
+        assert "confirmed" in result.lower()
+        with get_conn() as conn:
+            cat = conn.execute(
+                "SELECT chip_id FROM cats WHERE cat_id = ?",
+                (cat_id,),
+            ).fetchone()
+        assert cat["chip_id"] is None
+
+        ts = datetime(2026, 1, 1, 8, 10, tzinfo=timezone.utc)
+        record = VisitAnalyser({"trigger": {}}).analyse(
+            [{"timestamp": ts, "values": {"chip_id": cat_name}}],
+            ts,
+            ts,
+        )
+        assert record.tentative_cat_id == cat_id
+        assert record.confirmed_cat_id is None
+        assert record.is_confirmed is False
+
+    def test_name_fallback_confirms_even_after_real_chip_mapping(self, registered_cat):
+        from litterbox.tools import confirm_identity
+
+        cat_id, cat_name = registered_cat
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE cats SET chip_id = 'raw-chip-001' WHERE cat_id = ?",
+                (cat_id,),
+            )
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           ?, FALSE, 'chip', '[]')""",
+                (cat_name,),
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+
+        assert "confirmed" in result.lower()
+        with get_conn() as conn:
+            td_row = conn.execute(
+                """SELECT confirmed_cat_id, is_confirmed
+                   FROM td_visits WHERE td_visit_id = ?""",
+                (td_visit_id,),
+            ).fetchone()
+            cat = conn.execute(
+                "SELECT chip_id FROM cats WHERE cat_id = ?",
+                (cat_id,),
+            ).fetchone()
+        assert td_row["confirmed_cat_id"] == cat_id
+        assert bool(td_row["is_confirmed"])
+        assert cat["chip_id"] == "raw-chip-001"
+
+    def test_time_domain_chip_confirmation_rejects_cat_chip_conflict(self, registered_cat):
+        from litterbox.tools import confirm_identity
+
+        cat_id, cat_name = registered_cat
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE cats SET chip_id = 'other-chip' WHERE cat_id = ?",
+                (cat_id,),
+            )
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           'raw-chip-001', FALSE, 'chip', '[]')"""
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+
+        assert "Error" in result
+        assert "other-chip" in result
+        with get_conn() as conn:
+            td_row = conn.execute(
+                "SELECT is_confirmed FROM td_visits WHERE td_visit_id = ?",
+                (td_visit_id,),
+            ).fetchone()
+            cat = conn.execute(
+                "SELECT chip_id FROM cats WHERE cat_id = ?",
+                (cat_id,),
+            ).fetchone()
+        assert not bool(td_row["is_confirmed"])
+        assert cat["chip_id"] == "other-chip"
+
+    def test_plain_id_does_not_confirm_time_domain_visit(self, registered_cat):
+        from litterbox.tools import confirm_identity
+        _, cat_name = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           'raw-chip-001', FALSE, 'chip', '[]')"""
+            )
+            td_visit_id = cur.lastrowid
+
+        result = confirm_identity.invoke({"visit_id": td_visit_id, "cat_name": cat_name})
+
+        assert "td:" in result
+        assert "Error" in result
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT is_confirmed FROM td_visits WHERE td_visit_id = ?",
+                (td_visit_id,),
+            ).fetchone()
+        assert not bool(row["is_confirmed"])
+
 
 # ---------------------------------------------------------------------------
 # get_visits_by_date
@@ -327,11 +517,63 @@ class TestGetUnconfirmedVisits:
         result = get_unconfirmed_visits.invoke({})
         assert "unconfirmed" in result.lower() or "#" in result
 
+    def test_lists_zero_similarity_score(self, registered_cat):
+        from litterbox.tools import get_unconfirmed_visits
+        cat_id, _ = registered_cat
+        with get_conn() as conn:
+            conn.execute(
+                """INSERT INTO visits
+                   (entry_time, tentative_cat_id, is_confirmed, similarity_score)
+                   VALUES ('2026-01-01T08:00:00', ?, FALSE, 0.0)""",
+                (cat_id,),
+            )
+
+        result = get_unconfirmed_visits.invoke({})
+
+        assert "sim=0.00" in result
+
     def test_confirmed_visit_not_listed(self, registered_cat, open_visit):
         from litterbox.tools import confirm_identity, get_unconfirmed_visits
         cat_id, cat_name = registered_cat
         confirm_identity.invoke({"visit_id": open_visit, "cat_name": cat_name})
         result = get_unconfirmed_visits.invoke({})
+        assert "No unconfirmed" in result
+
+    def test_lists_unconfirmed_time_domain_visit(self, registered_cat):
+        from litterbox.tools import get_unconfirmed_visits
+        cat_id, _ = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, tentative_cat_id,
+                    is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           'raw-chip-001', ?, FALSE, 'chip', '[]')""",
+                (cat_id,),
+            )
+            td_visit_id = cur.lastrowid
+
+        result = get_unconfirmed_visits.invoke({})
+
+        assert f"td:{td_visit_id}" in result
+        assert "raw-chip-001" in result
+        assert "method=chip" in result
+
+    def test_confirmed_time_domain_visit_not_listed(self, registered_cat):
+        from litterbox.tools import confirm_identity, get_unconfirmed_visits
+        _, cat_name = registered_cat
+        with get_conn() as conn:
+            cur = conn.execute(
+                """INSERT INTO td_visits
+                   (entry_time, exit_time, chip_id, is_confirmed, id_method, snapshot_json)
+                   VALUES ('2026-01-01T08:00:00', '2026-01-01T08:05:00',
+                           'raw-chip-001', FALSE, 'chip', '[]')"""
+            )
+            td_visit_id = cur.lastrowid
+
+        confirm_identity.invoke({"visit_id": f"td:{td_visit_id}", "cat_name": cat_name})
+        result = get_unconfirmed_visits.invoke({})
+
         assert "No unconfirmed" in result
 
     def test_count_reflects_multiple_unconfirmed(self, registered_cat):

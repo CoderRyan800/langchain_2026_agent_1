@@ -78,7 +78,8 @@ one second. No API key is required for CLIP — it runs entirely on your machine
 ## 2. Bob — General Purpose Agent
 
 Bob is a conversational assistant for web searches, answering questions, and
-analysing images or audio files you upload.
+analysing images you upload. Audio uploads require configuring Bob to use an
+audio-capable model first.
 
 ### Starting Bob
 
@@ -99,22 +100,20 @@ You: What did we talk about last time?
 
 ### Uploading files
 
-Use `/UPLOAD` followed by an absolute path to share an image or audio file:
+Use `/UPLOAD` followed by an absolute path to share an image:
 
 ```
 You: /UPLOAD /Users/yourname/Desktop/xray.jpg
 You: What do you see in that image?
-
-You: /UPLOAD /tmp/voice_memo.mp3
-You: Can you transcribe that?
 ```
 
 **Supported image formats:** `.jpg` `.jpeg` `.png` `.gif` `.webp`
 
-**Supported audio formats:** `.mp3` `.wav` `.ogg` `.m4a` `.flac` `.opus`
+**Recognized audio formats after configuring an audio-capable model:** `.mp3` `.wav`
 
-> **Audio note:** Audio input requires changing `MODEL = "gpt-4o-audio-preview"`
-> at the top of `src/basic_agent.py`. The default `gpt-4o` supports images only.
+> **Audio note:** Audio input requires changing `MODEL` at the top of
+> `src/basic_agent.py` to an audio-capable model. The default `gpt-4o` path
+> supports images only and will reject audio uploads with a clear error.
 
 ### Quitting
 
@@ -202,15 +201,18 @@ identities** and **reviewing health alerts**.
 
 ```
 You: Show me visits that need confirmation
-Assistant: 4 unconfirmed visit(s):
+Assistant: 5 unconfirmed visit(s):
              #12: ~Whiskers (sim=0.94) at 2026-03-14 07:22:11
              #11: ~Marmalade (sim=0.88) at 2026-03-14 06:55:02
+             td:4: Unknown chip=raw-chip-001 method=chip at 2026-03-14 06:10:02
              #10: Unknown at 2026-03-13 23:10:44
              #9:  ~Whiskers (sim=0.91) ⚠️ at 2026-03-13 20:15:33
 ```
 
 The `~` prefix means tentative (not yet confirmed). The similarity score shows
 how confident the system was. A `⚠️` means that visit has a health flag.
+Classic image visits are shown as `#12`; time-domain visits are shown as
+`td:4` and must be confirmed with that prefix.
 
 ### Confirming an identity
 
@@ -220,6 +222,9 @@ Assistant: Visit #12 confirmed: cat is 'Whiskers'.
 
 You: Confirm visit 11 as Marmalade
 Assistant: Visit #11 confirmed: cat is 'Marmalade'.
+
+You: Confirm td:4 as Luna
+Assistant: Time-domain visit td:4 confirmed: cat is 'Luna'.
 ```
 
 ### Handling an Unknown visit
@@ -376,6 +381,11 @@ python src/litterbox_agent.py \
 
 ### Console script shorthand (after `pip install -e .`)
 
+The console script uses the direct Python API for sensor events. That avoids
+an extra LangGraph turn and supports custom data/image directories. The
+project-root script `python src/litterbox_agent.py` remains available for the
+LangGraph-driven interactive workflow and project-local `data/` directory.
+
 ```bash
 litterbox-agent --event entry --image /path/to/entry.jpg \
     --weight-pre 5412 --weight-entry 8634 --ammonia-peak 38
@@ -405,8 +415,15 @@ readings go into `visit_sensor_events` with a `phase` tag (`pre_entry`,
 
 ### How sensor values reach the tools
 
-Internally, the CLI flags are serialised into a plain-English message that the
-LangGraph agent reads:
+There are two command-line entry points with different routing:
+
+- `python src/litterbox_agent.py --event ...` serialises the sensor flags into
+  a plain-English message that the LangGraph agent reads.
+- `litterbox-agent --event ...` is the installed console script. It bypasses
+  LangGraph for sensor events and calls the direct Python API with the parsed
+  flag values.
+
+The project-root script's internal message looks like this:
 
 ```
 SENSOR EVENT: A cat has entered the litter box.
@@ -414,9 +431,11 @@ Entry image path: images/captures/entry_001.jpg
 Sensor readings: weight_pre_g=5412, weight_entry_g=8634, ammonia_peak_ppb=38, methane_peak_ppb=12.
 ```
 
-The agent extracts the named values from that message and passes them as
-parameters to `record_entry()`. This is why the system prompt explicitly
-instructs the agent to pass sensor readings from the event message to the tool.
+For the project-root script, the agent extracts the named values from that
+message and passes them as parameters to `record_entry()`. This is why the
+system prompt explicitly instructs the agent to pass sensor readings from the
+event message to the tool. The installed `litterbox-agent` path does not rely
+on LLM extraction for these flags.
 
 ### Exit event association
 
@@ -477,6 +496,10 @@ agent = LitterboxAgent(
     images_dir="/srv/litterbox/images",
 )
 ```
+
+Path overrides are process-global in the current implementation. Do not keep
+two differently configured `LitterboxAgent` instances active at the same time
+in one process; close one before switching to another data/image store.
 
 #### Key-in-code
 
@@ -612,14 +635,20 @@ Returns a summary of all registered cats and their reference image counts.
 #### `confirm_identity`
 
 ```python
-result: str = agent.confirm_identity(visit_id: int, cat_name: str)
+result: str = agent.confirm_identity(visit_id: int | str, cat_name: str)
 ```
 
-Permanently sets the confirmed cat identity for a visit.
+Permanently sets the confirmed cat identity for a visit. Use an integer for
+classic image visits and a `td:<id>` string for time-domain visits listed by
+`get_unconfirmed_visits()`. When a `td:` visit has a raw `chip_id`,
+confirmation stores that chip on the confirmed cat if no conflicting mapping
+exists and the chip value is not a registered cat name, so later visits with a
+real chip can auto-confirm.
 
 ```python
 print(agent.get_unconfirmed_visits())   # see what needs reviewing
 print(agent.confirm_identity(7, "Whiskers"))
+print(agent.confirm_identity("td:4", "Luna"))
 ```
 
 #### `retroactive_recognition`
@@ -647,7 +676,7 @@ All query methods hit the database directly — no LLM involved.
 | `get_visits_by_date(date_str)` | `"YYYY-MM-DD"` | All visits on that date |
 | `get_visits_by_cat(cat_name)` | cat name | All visits for that cat |
 | `get_anomalous_visits()` | — | All visits flagged as anomalous |
-| `get_unconfirmed_visits()` | — | Visits with tentative (unconfirmed) IDs |
+| `get_unconfirmed_visits()` | — | Classic and time-domain visits with tentative (unconfirmed) IDs |
 | `get_visit_images(visit_id)` | visit number | Entry and exit image paths |
 
 ```python
@@ -894,7 +923,9 @@ built-in `sqlite3` module — no special drivers required.
 
 | Interface | Database path |
 |---|---|
-| CLI (`python src/litterbox_agent.py`) | `data/litterbox.db` |
+| Project-root script (`python src/litterbox_agent.py`) | `data/litterbox.db` |
+| Console script (`litterbox-agent`) | `~/.litterbox_monitor/data/litterbox.db` |
+| Console script (`litterbox-agent --data-dir ...`) | `<data_dir>/litterbox.db` |
 | Python API (default) | `~/.litterbox_monitor/data/litterbox.db` |
 | Python API (custom `data_dir`) | `<data_dir>/litterbox.db` |
 
@@ -903,7 +934,7 @@ built-in `sqlite3` module — no special drivers required.
 ### Opening the database from the terminal
 
 ```bash
-# Standard production database (CLI / project-root usage)
+# Project-root script database
 sqlite3 data/litterbox.db
 
 # Default Python API location
@@ -937,7 +968,9 @@ sqlite> .mode column
 
 ### Database schema
 
-The database has four tables:
+The core image-visit schema starts with these tables. Time-domain and ML
+storage adds `td_visits`, `eigen_models`, `eigen_waveforms`, and
+`cluster_models` later in this guide.
 
 #### `cats` — registered cat profiles
 
@@ -945,9 +978,12 @@ The database has four tables:
 CREATE TABLE cats (
     cat_id     INTEGER PRIMARY KEY AUTOINCREMENT,
     name       TEXT UNIQUE NOT NULL,
+    chip_id    TEXT,                           -- optional RFID/NFC hardware ID
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 ```
+
+Non-null chip IDs are kept unique by the `idx_cats_chip_id` partial index.
 
 #### `cat_images` — reference photos per cat
 
@@ -1020,7 +1056,7 @@ Paste these directly into the `sqlite3` shell (remember `.headers on` and
 #### List all registered cats
 
 ```sql
-SELECT cat_id, name, created_at FROM cats ORDER BY name;
+SELECT cat_id, name, chip_id, created_at FROM cats ORDER BY name;
 ```
 
 #### Count reference images per cat
@@ -1520,7 +1556,7 @@ class BaseDriver(ABC):
 | `WeightDriver` | `weight` | `float` (grams) or `None` |
 | `AmmoniaDriver` | `ammonia` | `float` (ppb) or `None` |
 | `MethaneDriver` | `methane` | `float` (ppb) or `None` |
-| `ChipIdDriver` | `chip_id` | `str` (cat name) or `None` |
+| `ChipIdDriver` | `chip_id` | `str` (raw chip ID or cat name) or `None` |
 | `SimilarityDriver` | `similarity` | `dict[cat_name, score]` or `None` |
 
 All five classes act as **mocks** in tests and simulation.  In production,
@@ -1776,8 +1812,8 @@ file changes are required.
 |------|--------|--------|-------|
 | 1 | `time_buffer.py` — `RollingBuffer` + `load_td_config()` | **COMPLETE** | 42/42 |
 | 2 | `sensor_collector.py` — `SensorCollector` + driver interface | **COMPLETE** | 38/38 |
-| 3 | `visit_trigger.py` — `VisitTrigger` state machine | **COMPLETE** | 34/34 |
-| 4 | `visit_analyser.py` — cat ID from time-series, DB storage | **COMPLETE** | 23/23 |
+| 3 | `visit_trigger.py` — `VisitTrigger` state machine | **COMPLETE** | 35/35 |
+| 4 | `visit_analyser.py` — cat ID from time-series, DB storage | **COMPLETE** | 26/26 |
 | 5a | `analyser_pipeline.py` — plugin framework + resampling | **COMPLETE** | 20/20 |
 | 5b | `eigen_analyser.py` — eigendecomposition anomaly detection | **COMPLETE** | 35/35 |
 | 5c | `cluster_analyser.py` — GMM+BIC cluster analysis | **COMPLETE** | 15/15 |
@@ -1847,7 +1883,10 @@ table.
 #### Cat identification priority
 
 1. **Chip ID** — if any sample in the visit window has a non-null `chip_id`,
-   the most frequent value wins.  The visit is marked `is_confirmed = True`.
+   the most frequent value wins.  The visit is marked `is_confirmed = True`
+   only when that value maps to a registered cat via `cats.chip_id`. For
+   simulation compatibility, a value matching a cat name may populate
+   `tentative_cat_id`, but it remains unconfirmed for human review.
 2. **Similarity DataFrame** — the analyser builds a per-cat DataFrame from
    `similarity_*` channels, computes column means (`skipna=True`), and checks
    that the winning cat exceeds `similarity_entry_threshold` for at least

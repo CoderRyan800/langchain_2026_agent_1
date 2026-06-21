@@ -31,13 +31,15 @@ It is intentionally not a pytest suite. The reasons:
 
 ### Isolation
 
-All phases except Phase 5 run in an isolated test environment:
+All phases run in isolated test environments:
 
 - A separate SQLite database (`tests/test_data/litterbox_test.db`)
 - A separate Chroma vector index (`tests/test_data/chroma_test/`)
 - A separate image directory (`tests/test_data/images/`)
+- A separate console-script data directory for Phase 5 (`tests/test_data/cli_data/`)
+- A separate console-script image directory for Phase 5 (`tests/test_data/cli_images/`)
 
-The production `data/` directory and `images/` directory are never touched by Phases 1–4 or Phase 6. Phase 5 uses the production database deliberately — it tests the actual CLI entry point end-to-end.
+The production `data/` directory and `images/` directory are not touched by the manual runner.
 
 ### Test data
 
@@ -151,24 +153,28 @@ Checks 3.1c and 3.2b test for the veterinary disclaimer in the GPT-4o response. 
 ### Phase 4 — Identity confirmation *(no LLM calls)*
 
 **What it covers:**
-- `confirm_identity` sets `is_confirmed = TRUE` and `confirmed_cat_id` in the database
+- `confirm_identity` sets `is_confirmed = TRUE` and `confirmed_cat_id` in the database, including `td:<id>` time-domain visits
+- Confirming a raw-chip `td:<id>` visit stores the non-conflicting chip mapping on the cat when the value is not a simulator cat-name fallback, and future visits with that real chip auto-confirm
 - Confirming with an unknown cat name returns an error without modifying the database
 - Confirming with an invalid visit ID returns an error
-- A confirmed visit no longer appears in the `get_unconfirmed_visits` list
+- A confirmed classic or time-domain visit no longer appears in the `get_unconfirmed_visits` list
 
 **Number of checks:** 4
 
 ---
 
-### Phase 5 — End-to-end sensor CLI *(2–3 GPT-4o calls, writes to production data/)*
+### Phase 5 — End-to-end sensor CLI *(1–2 GPT-4o calls, isolated data)*
+
+Phase 5 requires `pip install -e .` in the active Python environment so the
+`litterbox-agent` console script exists.
 
 **What it covers:**
-- `--event entry --image <path>` invokes the agent as a subprocess, exits 0, and outputs "Visit … opened"
+- `litterbox-agent --event entry --image <path>` invokes the installed console script as a subprocess, exits 0, and outputs "Visit … opened"
 - `--event exit --image <path>` exits 0 and outputs "Visit … closed"
 - `--event exit` with no open visit exits 0 and outputs an orphan warning
 - `--event entry` without `--image` exits non-zero and prints a helpful error message
 
-**Note:** This phase uses the **production** `data/litterbox.db`. A small number of visit records (3) are written to the production database with Unknown tentative IDs, since no cats are registered there during an automated test run. These records are harmless and can be left in place or deleted manually.
+**Note:** This phase passes `--data-dir tests/test_data/cli_data` and `--images-dir tests/test_data/cli_images`, so subprocess testing stays isolated from production data.
 
 **Number of checks:** 8
 
@@ -220,7 +226,7 @@ The following results were recorded on the initial test run after the feature br
 - **CLIP same-image similarity: 1.0000** — identical vectors, as expected. In production, the same cat photographed twice will score lower (typically 0.85–0.97 depending on angle and lighting changes).
 - **Non-cat similarity: 0.5192** — a solid blue rectangle scores 0.52 against a cat photo, comfortably below the 0.82 threshold. Real photos of a different cat will score higher (typically 0.65–0.80), which is why the two-stage pipeline (CLIP + GPT-4o visual confirmation) exists.
 - **Phase 3 advisory notes** — GPT-4o correctly declined to perform veterinary analysis on synthetic Pillow-generated images. This is expected behaviour. With genuine litter box camera images, the health analysis runs fully including the veterinary disclaimer.
-- **Phase 5 production writes** — 3 visit records were written to `data/litterbox.db` with Unknown tentative IDs. This is expected since no cats are registered in the production database during an automated test run.
+- **Phase 5 isolation** — subprocess records are written under `tests/test_data/cli_data/`, not the project `data/` directory.
 
 ---
 
@@ -238,12 +244,6 @@ The veterinary disclaimer checks (3.1c, 3.2b) are advisory because GPT-4o will d
 
 Chroma's `PersistentClient` holds OS-level file handles. Within a single Python process, deleting the Chroma data directory and creating a new client does not fully release the old state. This affects Phase 6 of the test suite (see above) but does not affect normal production use, where each agent invocation is a fresh process.
 
-### Phase 5 writes to production
-
-Phase 5 tests the actual CLI entry point using subprocesses, which means it uses the production `data/` directory. The test records it creates are harmless but visible. If you want a completely clean production database, delete the 3 Unknown-ID visit records it creates after running the full test suite.
-
----
-
 ## 6. Time-Domain Measurement System — pytest suite
 
 The time-domain system (branch `feature/time_domain_measurements`) has its own
@@ -257,20 +257,20 @@ entirely offline and complete in about 12 seconds.
 |-----------|------|---------------|-------|
 | `tests/test_time_buffer.py` | 1 | `RollingBuffer` + `load_td_config()` | 42 |
 | `tests/test_sensor_collector.py` | 2 | `BaseDriver`, all 5 driver classes, `SensorCollector` | 38 |
-| `tests/test_visit_trigger.py` | 3 | `VisitTrigger` state machine | 34 |
-| `tests/test_visit_analyser.py` | 4 | `VisitAnalyser`, `TdVisitRecord`, image retention | 23 |
+| `tests/test_visit_trigger.py` | 3 | `VisitTrigger` state machine | 35 |
+| `tests/test_visit_analyser.py` | 4 | `VisitAnalyser`, `TdVisitRecord`, image retention | 26 |
 | `tests/test_eigen_analyser.py` | 5a | Eigendecomposition, EV scoring, regularization, DC trending | 35 |
 | `tests/test_eigen_query.py` | 5b | Read-side query helpers and report integration | 15 |
 | `tests/test_cluster_analyser.py` | 5c | GMM+BIC clustering on expansion coefficients | 15 |
-| `tests/test_analyser_pipeline.py` | 5  | Plugin orchestration (resample → eigen → cluster) | 24 |
-| `tests/test_gas_anomaly.py` | —  | Data-driven NH₃/CH₄ detector (median + MAD on log-readings) | 35 |
+| `tests/test_analyser_pipeline.py` | 5  | Plugin orchestration (resample → eigen → cluster) | 20 |
+| `tests/test_gas_anomaly.py` | —  | Data-driven NH₃/CH₄ detector (median + MAD on log-readings) | 34 |
 | `tests/test_history_plot.py` | —  | Per-cat Bokeh history plot module + tool wrapper | 27 |
 | `tests/test_rescore.py` | —  | Rescore historical visits against current detector | 14 |
-| **Subtotal** | | | **302** |
+| **Subtotal** | | | **301** |
 
 The full pytest suite (this table plus the legacy non-time-domain tests
 under `test_db.py`, `test_health.py`, `test_tools_*.py`, `test_integration.py`,
-`test_api.py`) currently runs **585 non-slow tests** in about 22 s. Add
+`test_api.py`) currently runs **649 non-slow tests** in about 52 s. Add
 `pytest -m slow` for an additional 20 CLIP-embedding tests (model download
 on first run).
 
@@ -362,14 +362,14 @@ t2: anna=0.89  luna=0.25
 | `TestWeightDriver` (4) | Zero noise; Gaussian noise variance and range; defaults |
 | `TestAmmoniaDriver` (3) | Zero noise; zero-clamp with large negative noise; defaults |
 | `TestMethaneDriver` (3) | Same as ammonia |
-| `TestChipIdDriver` (3) | Cat name return; None return; defaults |
+| `TestChipIdDriver` (3) | Raw chip/cat-name return; None return; defaults |
 | `TestSimilarityDriver` (4) | Dict return; None return; copy-on-read |
 | `TestSampleOnce` (9) | Buffer population; similarity expansion; disabled channel; missing driver; UTC timestamps; chip_id None semantics |
 | `TestRunMultipleTicks` (2) | Background thread produces ≥ 3 entries in 0.4 s; timestamps monotonic |
 | `TestStop` (4) | stop() within 2 s; idempotent; safe before start(); double-start raises |
 | `TestRepr` (3) | Interval in repr; running state in repr |
 
-#### Step 3 — `test_visit_trigger.py` (34 tests)
+#### Step 3 — `test_visit_trigger.py` (35 tests)
 
 | Test class | Focus |
 |------------|-------|

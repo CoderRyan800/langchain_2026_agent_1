@@ -4,7 +4,7 @@ import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple, Union
 
 from langchain.tools import tool
 from langchain.messages import HumanMessage
@@ -57,6 +57,30 @@ def _run_gpt4o_vision(prompt: str, *image_paths: str) -> str:
         content.append(_image_content_block(p))
     response = llm.invoke([HumanMessage(content=content)])
     return response.content
+
+
+def _parse_visit_reference(visit_id: Union[int, str]) -> Tuple[str, int]:
+    """Return (table_kind, numeric_id) for a user-facing visit reference.
+
+    Plain integer references point at the original ``visits`` table for
+    backward compatibility. Time-domain visits must use the explicit ``td:N``
+    namespace so ``visits.visit_id = 7`` and ``td_visits.td_visit_id = 7`` are
+    never confused.
+    """
+    raw = str(visit_id).strip()
+    lowered = raw.lower()
+    if lowered.startswith(("td:", "td#", "td-")):
+        numeric = raw[3:].strip()
+        kind = "td"
+    else:
+        numeric = raw
+        kind = "visit"
+
+    if not numeric.isdigit() or int(numeric) <= 0:
+        raise ValueError(
+            "visit_id must be a positive integer or a time-domain reference like 'td:7'"
+        )
+    return kind, int(numeric)
 
 
 def _log_sensor_events(
@@ -447,14 +471,19 @@ def record_exit(
 
 
 @tool
-def confirm_identity(visit_id: int, cat_name: str) -> str:
+def confirm_identity(visit_id: Union[int, str], cat_name: str) -> str:
     """Confirm the true identity of a cat for a given visit.
 
-    visit_id: the visit number to confirm.
+    visit_id: classic visit number, or "td:<id>" for a time-domain visit.
     cat_name: the cat's actual name as recognised by the owner.
     The cat must already be registered. Permanently sets confirmed_cat_id.
     """
     init_db()
+    try:
+        visit_kind, numeric_id = _parse_visit_reference(visit_id)
+    except ValueError as exc:
+        return f"Error: {exc}"
+
     with get_conn() as conn:
         cat = conn.execute(
             "SELECT cat_id FROM cats WHERE name = ?", (cat_name,)
@@ -464,17 +493,85 @@ def confirm_identity(visit_id: int, cat_name: str) -> str:
                 f"Error: no cat named '{cat_name}' in the database. "
                 f"Register them first with register_cat_image."
             )
+
+        if visit_kind == "td":
+            visit = conn.execute(
+                "SELECT td_visit_id, chip_id FROM td_visits WHERE td_visit_id = ?",
+                (numeric_id,),
+            ).fetchone()
+            if not visit:
+                return f"Error: time-domain visit td:{numeric_id} not found."
+
+            chip_id = visit["chip_id"]
+            if chip_id:
+                # Simulator fixtures sometimes use the cat's name as the
+                # chip_id value. That fallback is useful for tentative labels,
+                # but should not be promoted into an authoritative RFID/NFC
+                # hardware mapping or rejected because a real mapping exists.
+                name_collision = conn.execute(
+                    "SELECT cat_id FROM cats WHERE name = ?",
+                    (chip_id,),
+                ).fetchone()
+
+                cat_chip = conn.execute(
+                    "SELECT chip_id FROM cats WHERE cat_id = ?",
+                    (cat["cat_id"],),
+                ).fetchone()
+                existing_chip = cat_chip["chip_id"] if cat_chip else None
+                if name_collision is None and existing_chip and existing_chip != chip_id:
+                    return (
+                        f"Error: cat '{cat_name}' is already mapped to chip "
+                        f"'{existing_chip}', not '{chip_id}'."
+                    )
+
+                if name_collision is None:
+                    chip_owner = conn.execute(
+                        """SELECT cat_id, name FROM cats
+                           WHERE chip_id = ? AND cat_id <> ?""",
+                        (chip_id, cat["cat_id"]),
+                    ).fetchone()
+                    if chip_owner:
+                        return (
+                            f"Error: chip '{chip_id}' is already mapped to "
+                            f"'{chip_owner['name']}'."
+                        )
+
+                if existing_chip is None and name_collision is None:
+                    conn.execute(
+                        "UPDATE cats SET chip_id = ? WHERE cat_id = ?",
+                        (chip_id, cat["cat_id"]),
+                    )
+
+            conn.execute(
+                """UPDATE td_visits
+                   SET confirmed_cat_id = ?,
+                       tentative_cat_id = COALESCE(tentative_cat_id, ?),
+                       is_confirmed = TRUE
+                   WHERE td_visit_id = ?""",
+                (cat["cat_id"], cat["cat_id"], numeric_id),
+            )
+            return f"Time-domain visit td:{numeric_id} confirmed: cat is '{cat_name}'."
+
         visit = conn.execute(
-            "SELECT visit_id FROM visits WHERE visit_id = ?", (visit_id,)
+            "SELECT visit_id FROM visits WHERE visit_id = ?", (numeric_id,)
         ).fetchone()
         if not visit:
-            return f"Error: visit #{visit_id} not found."
+            td_hint = conn.execute(
+                "SELECT td_visit_id FROM td_visits WHERE td_visit_id = ?",
+                (numeric_id,),
+            ).fetchone()
+            if td_hint:
+                return (
+                    f"Error: visit #{numeric_id} not found in classic visits. "
+                    f"Use visit_id='td:{numeric_id}' for the time-domain visit."
+                )
+            return f"Error: visit #{numeric_id} not found."
 
         conn.execute(
             "UPDATE visits SET confirmed_cat_id = ?, is_confirmed = TRUE WHERE visit_id = ?",
-            (cat["cat_id"], visit_id),
+            (cat["cat_id"], numeric_id),
         )
-    return f"Visit #{visit_id} confirmed: cat is '{cat_name}'."
+    return f"Visit #{numeric_id} confirmed: cat is '{cat_name}'."
 
 
 @tool
@@ -843,10 +940,10 @@ def get_visit_details(visit_id: int) -> str:
 
 @tool
 def get_unconfirmed_visits() -> str:
-    """List all visits that still have a tentative (unconfirmed) cat ID."""
+    """List classic and time-domain visits that still need identity review."""
     init_db()
     with get_conn() as conn:
-        rows = conn.execute(
+        classic_rows = conn.execute(
             """SELECT v.visit_id, v.entry_time, tc.name AS tentative_name,
                       v.similarity_score, v.is_anomalous
                FROM visits v
@@ -854,6 +951,42 @@ def get_unconfirmed_visits() -> str:
                WHERE v.is_confirmed = FALSE
                ORDER BY v.entry_time DESC"""
         ).fetchall()
+        td_rows = conn.execute(
+            """SELECT tv.td_visit_id, tv.entry_time, tv.chip_id, tv.id_method,
+                      tc.name AS tentative_name, tv.top_similarity,
+                      tv.is_anomalous
+               FROM td_visits tv
+               LEFT JOIN cats tc ON tv.tentative_cat_id = tc.cat_id
+               WHERE tv.is_confirmed = FALSE
+               ORDER BY tv.entry_time DESC"""
+        ).fetchall()
+
+    rows = []
+    for r in classic_rows:
+        rows.append(
+            {
+                "kind": "visit",
+                "id": r["visit_id"],
+                "entry_time": r["entry_time"],
+                "tentative_name": r["tentative_name"],
+                "similarity": r["similarity_score"],
+                "is_anomalous": r["is_anomalous"],
+            }
+        )
+    for r in td_rows:
+        rows.append(
+            {
+                "kind": "td",
+                "id": r["td_visit_id"],
+                "entry_time": r["entry_time"],
+                "tentative_name": r["tentative_name"],
+                "similarity": r["top_similarity"],
+                "is_anomalous": r["is_anomalous"],
+                "chip_id": r["chip_id"],
+                "id_method": r["id_method"],
+            }
+        )
+    rows.sort(key=lambda r: r["entry_time"] or "", reverse=True)
 
     if not rows:
         return "No unconfirmed visits — all visits have been confirmed."
@@ -861,9 +994,16 @@ def get_unconfirmed_visits() -> str:
     lines = [f"{len(rows)} unconfirmed visit(s):"]
     for r in rows:
         cat = f"~{r['tentative_name']}" if r["tentative_name"] else "Unknown"
-        score = f" (sim={r['similarity_score']:.2f})" if r["similarity_score"] else ""
+        score = f" (sim={r['similarity']:.2f})" if r["similarity"] is not None else ""
         anomaly = " ⚠️" if r["is_anomalous"] else ""
-        lines.append(f"  #{r['visit_id']}: {cat}{score}{anomaly} at {r['entry_time']}")
+        if r["kind"] == "td":
+            chip = f" chip={r['chip_id']}" if r.get("chip_id") else ""
+            method = f" method={r['id_method']}" if r.get("id_method") else ""
+            lines.append(
+                f"  td:{r['id']}: {cat}{score}{chip}{method}{anomaly} at {r['entry_time']}"
+            )
+        else:
+            lines.append(f"  #{r['id']}: {cat}{score}{anomaly} at {r['entry_time']}")
     return "\n".join(lines)
 
 

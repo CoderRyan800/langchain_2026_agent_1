@@ -115,6 +115,11 @@ Important rules:
 class LitterboxAgent:
     """Python API for the litter box monitoring agent.
 
+    The current implementation configures the underlying tools through
+    module-level path variables. Keep only one differently configured
+    ``LitterboxAgent`` active per process; create/close agents sequentially
+    when switching data or image directories.
+
     Parameters
     ----------
     data_dir:
@@ -326,13 +331,14 @@ class LitterboxAgent:
     # Identity management
     # ------------------------------------------------------------------
 
-    def confirm_identity(self, visit_id: int, cat_name: str) -> str:
+    def confirm_identity(self, visit_id: int | str, cat_name: str) -> str:
         """Permanently confirm the cat's identity for a given visit.
 
         Parameters
         ----------
         visit_id:
-            The visit number to confirm (as returned by any query tool).
+            The classic visit number to confirm, or "td:<id>" for a
+            time-domain visit from ``get_unconfirmed_visits``.
         cat_name:
             The cat's registered name.
         """
@@ -522,8 +528,16 @@ class LitterboxAgent:
         response = self._get_agent().invoke(
             {"messages": [HumanMessage(content=message)]}, config=config
         )
+
+        messages = response["messages"]
+        turn_start = 0
+        for i in range(len(messages) - 1, -1, -1):
+            if isinstance(messages[i], HumanMessage):
+                turn_start = i + 1
+                break
+
         parts = []
-        for msg in response["messages"]:
+        for msg in messages[turn_start:]:
             if isinstance(msg, ToolMessage):
                 parts.append(f"[tool] {msg.content}")
             elif isinstance(msg, AIMessage) and msg.content:

@@ -19,6 +19,7 @@ def init_db() -> None:
             CREATE TABLE IF NOT EXISTS cats (
                 cat_id    INTEGER PRIMARY KEY AUTOINCREMENT,
                 name      TEXT UNIQUE NOT NULL,
+                chip_id   TEXT,
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             );
 
@@ -140,6 +141,15 @@ def init_db() -> None:
         for col, typ in cluster_cols:
             if col not in ew_cols:
                 conn.execute(f"ALTER TABLE eigen_waveforms ADD COLUMN {col} {typ}")
+
+        # Idempotent migration: add hardware chip-ID mapping to older cats tables.
+        cat_cols = {row[1] for row in conn.execute("PRAGMA table_info(cats)")}
+        if "chip_id" not in cat_cols:
+            conn.execute("ALTER TABLE cats ADD COLUMN chip_id TEXT")
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_cats_chip_id "
+            "ON cats(chip_id) WHERE chip_id IS NOT NULL"
+        )
 
         # Idempotent migration: add sensor columns to visits if this is an older DB
         existing_cols = {row[1] for row in conn.execute("PRAGMA table_info(visits)")}

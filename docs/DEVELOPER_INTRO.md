@@ -393,13 +393,14 @@ etc.
 ### Run the tests
 
 ```bash
-pytest -m "not slow"     # 629 tests, ~22 seconds
+pytest -m "not slow"     # 649 tests, ~52 seconds
 pytest -m slow           # CLIP embedding tests, ~minute (downloads model first time)
-pytest                   # all 649 tests
+pytest                   # all 669 tests
 ```
 
-Tests use isolated tmp directories — they cannot touch your live
-database. Each test gets a fresh schema.
+Automated pytest tests use isolated tmp directories. The manual integration
+runner uses `tests/test_data/` and its Phase 5 subprocess path passes explicit
+isolated `--data-dir` and `--images-dir` arguments.
 
 ### Run the simulator
 

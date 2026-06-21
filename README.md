@@ -52,10 +52,12 @@ TAVILY_API_KEY=your_tavily_api_key      # Bob only
 conda create -n langchain_env_2026_1 python=3.11 -y
 conda activate langchain_env_2026_1
 pip install -r requirements.txt
+pip install -e .       # installs litterbox-agent / litterbox-bob console scripts
 
 # Python venv
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e .       # installs litterbox-agent / litterbox-bob console scripts
 ```
 
 ### 3. Run
@@ -82,13 +84,14 @@ python src/litterbox_agent.py --event exit --image images/captures/exit.jpg \
 
 ```bash
 # Automated pytest (no LLM calls — fast)
-pytest -m "not slow"                          # 629 tests, ~22 s
+pytest -m "not slow"                          # 649 tests, ~52 s
 pytest -m slow                                # CLIP embedding tests (downloads ~350 MB model once)
 
 # Manual integration test runner (uses real LLM API calls)
+# Full run requires the editable install above so Phase 5 can call litterbox-agent.
 python tests/run_manual_test.py               # all 8 phases (~$0.25–0.50)
 python tests/run_manual_test.py --phase 1     # storage/schema only — free
-python tests/run_manual_test.py --phase 8     # sensor data ingestion only — free
+python tests/run_manual_test.py --phase 8     # sensor data ingestion — 1–2 GPT-4o calls
 ```
 
 ---
@@ -97,7 +100,7 @@ python tests/run_manual_test.py --phase 8     # sensor data ingestion only — f
 
 ### Bob
 
-Bob is a persistent conversational assistant. He uses `gpt-4o`, Tavily web search, and SQLite-backed memory that survives restarts. Use `/UPLOAD <path>` to share an image or audio file for analysis, and `/STOP` to quit.
+Bob is a persistent conversational assistant. He uses `gpt-4o`, Tavily web search, and SQLite-backed memory that survives restarts. Use `/UPLOAD <path>` to share an image for analysis, and `/STOP` to quit. Audio uploads require changing `MODEL` in `src/basic_agent.py` to an audio-capable model first.
 
 ### Litter Box Monitor
 

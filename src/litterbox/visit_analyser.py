@@ -10,7 +10,8 @@ Cat identification follows a strict priority order:
 
 1. **Chip ID** — if any sample in the visit window has a non-null ``chip_id``
    channel, the most frequent non-null value is used.  The visit is marked
-   ``is_confirmed = True`` because chip-based ID is authoritative.
+   ``is_confirmed = True`` only when that chip value maps to a registered cat;
+   otherwise the raw chip value is preserved for human review.
 
 2. **Similarity DataFrame** — when no chip ID is available and the
    ``similarity`` channel is enabled, a per-cat DataFrame of CLIP scores is
@@ -136,6 +137,8 @@ class VisitAnalyser:
             Populated record ready for ``save()``.  ``td_visit_id`` is
             ``None`` until ``save()`` is called.
         """
+        init_db()  # idempotent; ensures old DBs have cats.chip_id before lookup
+
         snapshot_json = _serialize_snapshot(snapshot)
 
         # Filter to the visit window.
@@ -236,14 +239,18 @@ class VisitAnalyser:
         # Most frequent non-null chip ID.
         winning_chip = Counter(chip_values).most_common(1)[0][0]
 
-        # Look up cat by name (chip_id stores the cat name string).
-        cat_id = self._lookup_cat_by_name(winning_chip)
+        # Prefer a hardware chip-ID mapping. Preserve the simulator's
+        # historical convention where chip_id stores the cat name string, but
+        # treat that fallback as tentative rather than authoritative.
+        cat_id, is_confirmed = self._lookup_cat_by_chip_or_name(winning_chip)
+
+        confirmed_cat_id = cat_id if is_confirmed else None
 
         return {
             "chip_id": winning_chip,
             "tentative_cat_id": cat_id,
-            "confirmed_cat_id": cat_id,
-            "is_confirmed": True,
+            "confirmed_cat_id": confirmed_cat_id,
+            "is_confirmed": is_confirmed,
             "id_method": "chip",
         }
 
@@ -267,7 +274,7 @@ class VisitAnalyser:
             return None
 
         col_means = df.mean(skipna=True)
-        if col_means.empty:
+        if col_means.empty or col_means.dropna().empty:
             return None
 
         winning_cat = col_means.idxmax()
@@ -348,8 +355,33 @@ class VisitAnalyser:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def _lookup_cat_by_chip_or_name(identifier: str) -> tuple[Optional[int], bool]:
+        """Look up a cat_id by hardware chip_id first, then tentative cat name.
+
+        Returns ``(cat_id, is_confirmed)``. Hardware chip-ID matches are
+        authoritative; cat-name fallback exists for simulator compatibility and
+        remains unconfirmed for human review.
+        """
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT cat_id FROM cats WHERE chip_id = ?",
+                (identifier,),
+            ).fetchone()
+            if row is not None:
+                return row["cat_id"], True
+
+            row = conn.execute(
+                "SELECT cat_id FROM cats WHERE name = ?",
+                (identifier,),
+            ).fetchone()
+            if row is not None:
+                return row["cat_id"], False
+
+        return None, False
+
+    @staticmethod
     def _lookup_cat_by_name(name: str) -> Optional[int]:
-        """Look up a cat_id by name.  Returns None if not found."""
+        """Look up a cat_id by registered cat name. Returns None if not found."""
         with get_conn() as conn:
             row = conn.execute(
                 "SELECT cat_id FROM cats WHERE name = ?", (name,)

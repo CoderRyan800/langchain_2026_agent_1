@@ -13,23 +13,19 @@ from langchain.messages import HumanMessage, AIMessage, ToolMessage
 from langchain.tools import tool
 from langgraph.checkpoint.sqlite import SqliteSaver
 
-# override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins over
-# any conflicting values inherited from the parent shell.
-load_dotenv(override=True)
-
-tavily_client = TavilyClient()
+_tavily_client: TavilyClient | None = None
 
 system_prompt = """
 You are a friendly and helpful agent named Bob. You are here to help the user with their questions and requests.
 You can use the web_search tool to search the web for information.
 When the user uploads an image, describe and analyze it thoroughly.
-When the user uploads an audio file, transcribe and analyze its contents.
+Audio uploads require configuring MODEL to an audio-capable model before use.
 """
 
 # Supported file types for /UPLOAD
 SUPPORTED_IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".gif", ".webp"}
 # Audio requires model="gpt-4o-audio-preview" — see MODEL constant below
-SUPPORTED_AUDIO_TYPES = {".mp3", ".wav", ".ogg", ".m4a", ".flac", ".opus"}
+SUPPORTED_AUDIO_TYPES = {".mp3", ".wav"}
 
 # gpt-4o supports vision (images). For audio, switch to "gpt-4o-audio-preview".
 MODEL = "gpt-4o"
@@ -38,7 +34,13 @@ MODEL = "gpt-4o"
 @tool
 def web_search(query: str) -> Dict[str, Any]:
     """Search the web for information"""
-    return tavily_client.search(query)
+    global _tavily_client
+    if _tavily_client is None:
+        # override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins
+        # over any conflicting values inherited from the parent shell.
+        load_dotenv(override=True)
+        _tavily_client = TavilyClient()
+    return _tavily_client.search(query)
 
 
 def build_upload_content(file_path: str) -> List[Dict]:
@@ -67,14 +69,17 @@ def build_upload_content(file_path: str) -> List[Dict]:
                 "image_url": {"url": f"data:{mime_type};base64,{b64_data}"},
             },
         ]
-    else:
-        # Audio format name for OpenAI: m4a -> mp4, others use extension as-is
-        fmt_map = {"m4a": "mp4", "flac": "flac", "ogg": "ogg", "opus": "opus"}
-        fmt = fmt_map.get(suffix.lstrip("."), suffix.lstrip("."))
-        return [
-            {"type": "text", "text": f"I uploaded this audio file: {path.name}"},
-            {"type": "input_audio", "input_audio": {"data": b64_data, "format": fmt}},
-        ]
+    if "audio" not in MODEL:
+        raise ValueError(
+            "Audio uploads require an audio-capable MODEL; "
+            f"current MODEL is {MODEL!r}."
+        )
+
+    fmt = suffix.lstrip(".")
+    return [
+        {"type": "text", "text": f"I uploaded this audio file: {path.name}"},
+        {"type": "input_audio", "input_audio": {"data": b64_data, "format": fmt}},
+    ]
 
 
 def print_response(response: Dict) -> None:
@@ -96,53 +101,63 @@ def print_response(response: Dict) -> None:
     print()
 
 
-# SQLite checkpointer persists conversation history across restarts.
-# The DB file is created in the working directory as agent_memory.db.
-with SqliteSaver.from_conn_string("agent_memory.db") as checkpointer:
-    agent = create_agent(
-        model=MODEL,
-        system_prompt=system_prompt,
-        checkpointer=checkpointer,
-        tools=[web_search],
-        middleware=[
-            SummarizationMiddleware(
-                model=MODEL,
-                trigger=("messages", 10),
-                keep=("messages", 3),
-            )
-        ],
-    )
+def main() -> None:
+    # override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins over
+    # any conflicting values inherited from the parent shell.
+    load_dotenv(override=True)
 
-    config = {"configurable": {"thread_id": "1"}}
+    # SQLite checkpointer persists conversation history across restarts.
+    # The DB file is created in the working directory as agent_memory.db.
+    with SqliteSaver.from_conn_string("agent_memory.db") as checkpointer:
+        agent = create_agent(
+            model=MODEL,
+            system_prompt=system_prompt,
+            checkpointer=checkpointer,
+            tools=[web_search],
+            middleware=[
+                SummarizationMiddleware(
+                    model=MODEL,
+                    trigger=("messages", 10),
+                    keep=("messages", 3),
+                )
+            ],
+        )
 
-    print("Agent Bob ready.")
-    print("Commands:  /STOP               — quit")
-    print("           /UPLOAD <filepath>  — upload an image or audio file\n")
+        config = {"configurable": {"thread_id": "1"}}
 
-    while True:
-        try:
-            user_input = input("You: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print("\nExiting.")
-            sys.exit(0)
+        print("Agent Bob ready.")
+        print("Commands:  /STOP               — quit")
+        print("           /UPLOAD <filepath>  — upload an image")
+        print("                                (audio requires an audio-capable MODEL)\n")
 
-        if not user_input:
-            continue
-
-        if user_input == "/STOP":
-            print("Goodbye!")
-            break
-
-        if user_input.startswith("/UPLOAD "):
-            file_path = user_input[len("/UPLOAD "):].strip()
+        while True:
             try:
-                content = build_upload_content(file_path)
-            except (FileNotFoundError, ValueError) as e:
-                print(f"Upload error: {e}\n")
-                continue
-            message = HumanMessage(content=content)
-        else:
-            message = HumanMessage(content=user_input)
+                user_input = input("You: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print("\nExiting.")
+                sys.exit(0)
 
-        response = agent.invoke({"messages": [message]}, config=config)
-        print_response(response)
+            if not user_input:
+                continue
+
+            if user_input == "/STOP":
+                print("Goodbye!")
+                break
+
+            if user_input.startswith("/UPLOAD "):
+                file_path = user_input[len("/UPLOAD "):].strip()
+                try:
+                    content = build_upload_content(file_path)
+                except (FileNotFoundError, ValueError) as e:
+                    print(f"Upload error: {e}\n")
+                    continue
+                message = HumanMessage(content=content)
+            else:
+                message = HumanMessage(content=user_input)
+
+            response = agent.invoke({"messages": [message]}, config=config)
+            print_response(response)
+
+
+if __name__ == "__main__":
+    main()

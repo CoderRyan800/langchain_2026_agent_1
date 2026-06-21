@@ -3,12 +3,16 @@ import sys
 
 
 def main():
-    """``litterbox-agent`` command — equivalent to ``python src/litterbox_agent.py``."""
+    """``litterbox-agent`` command backed by the direct Python API.
+
+    Sensor events call the API methods directly so they can use custom data
+    directories and avoid an extra LangGraph turn.  ``python src/litterbox_agent.py``
+    remains the project-root LangGraph script.
+    """
     import argparse
     from pathlib import Path
 
     from dotenv import load_dotenv
-    from langgraph.checkpoint.sqlite import SqliteSaver
 
     # override=True so the project .env (e.g. LANGSMITH_TRACING=false) wins
     # over any conflicting values inherited from the parent shell.
@@ -27,8 +31,7 @@ def main():
     parser.add_argument("--methane-peak", type=float, metavar="PPB")
     args = parser.parse_args()
 
-    from litterbox.api import LitterboxAgent, _SYSTEM_PROMPT
-    from litterbox.tools import ALL_TOOLS
+    from litterbox.api import LitterboxAgent
     from langchain.messages import HumanMessage, AIMessage, ToolMessage
 
     agent_obj = LitterboxAgent(
@@ -77,22 +80,7 @@ def main():
         return
 
     # Interactive mode
-    from langchain.agents import create_agent
-    from langchain.agents.middleware import SummarizationMiddleware
-
-    lg_agent = create_agent(
-        model="gpt-4o",
-        system_prompt=_SYSTEM_PROMPT,
-        checkpointer=agent_obj._checkpointer,
-        tools=ALL_TOOLS,
-        middleware=[
-            SummarizationMiddleware(
-                model="gpt-4o",
-                trigger=("messages", 10),
-                keep=("messages", 3),
-            )
-        ],
-    )
+    lg_agent = agent_obj._get_agent()
     config = {"configurable": {"thread_id": "interactive"}}
 
     print("Litter Box Agent ready.")
@@ -129,13 +117,10 @@ def main():
 
 def bob():
     """``litterbox-bob`` command — start the Bob general-purpose assistant."""
-    import runpy
-    import sys
-    from pathlib import Path
+    from basic_agent import main as bob_main
 
-    # Locate the src directory relative to this file
-    src_dir = Path(__file__).parent.parent
-    if str(src_dir) not in sys.path:
-        sys.path.insert(0, str(src_dir))
+    bob_main()
 
-    runpy.run_path(str(src_dir / "basic_agent.py"), run_name="__main__")
+
+if __name__ == "__main__":
+    main()

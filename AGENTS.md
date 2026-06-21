@@ -15,6 +15,7 @@ Two AI agents built with LangChain and LangGraph:
 conda create -n langchain_env_2026_1 python=3.11 -y
 conda activate langchain_env_2026_1
 pip install -r requirements.txt
+pip install -e .       # installs litterbox-agent / litterbox-bob console scripts
 ```
 
 Required `.env` file:
@@ -43,24 +44,27 @@ python src/litterbox_agent.py --event exit --image /path/to/image.jpg \
     --weight-exit 5680 --ammonia-peak 62 --methane-peak 41
 ```
 
-Bob supports `/UPLOAD /path/to/file` for images/audio and `/STOP` to quit.
+Bob supports `/UPLOAD /path/to/file` for images and `/STOP` to quit. Audio
+uploads require changing `MODEL` in `src/basic_agent.py` to an audio-capable
+model first.
 
 ## Tests
 
 ```bash
 # Manual integration test runner (uses real LLM calls)
+# Full run requires `pip install -e .` so Phase 5 can call `litterbox-agent`.
 python tests/run_manual_test.py                    # all 8 phases (~$0.25–0.50)
 python tests/run_manual_test.py --phase 1          # phase 1 only (free, no LLM calls)
 python tests/run_manual_test.py --phase 1 2 4      # multiple phases
 python tests/run_manual_test.py --no-cleanup       # keep test artifacts
 
 # Automated pytest suite (no LLM calls except slow CLIP tests)
-pytest -m "not slow"    # 629 tests, ~22 s
+pytest -m "not slow"    # 649 tests, ~52 s
 pytest -m slow          # CLIP embedding tests (~350 MB model download on first run)
-pytest                  # all 649 tests
+pytest                  # all 669 tests
 ```
 
-Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free. The test suite uses isolated paths (`tests/test_data/`) to avoid touching production data.
+Manual test phases: 1=storage/schema, 2=CLIP embeddings, 3=health analysis, 4=identity confirmation, 5=sensor CLI, 6=reset, 7=retroactive recognition, 8=sensor data ingestion. Phases 1, 4, 6 are free; phases 2, 3, 5, 7, 8 may make real model calls. The manual runner uses isolated paths under `tests/test_data/` to avoid touching production data.
 
 Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt builder/parser/refusal sanitiser), `test_tools_core.py` (query tools incl. `get_visit_details`), `test_tools_sensor.py` (record_entry/record_exit with sensors), `test_integration.py` (full lifecycle), `test_embeddings.py` (CLIP — slow), `test_time_buffer.py` (Step 1), `test_sensor_collector.py` (Step 2), `test_visit_trigger.py` (Step 3), `test_visit_analyser.py` (Step 4), `test_eigen_analyser.py` / `test_eigen_query.py` (Step 5a/5b), `test_cluster_analyser.py` (Step 5c), `test_analyser_pipeline.py` (analyser pipeline orchestration), `test_gas_anomaly.py` (data-driven NH₃/CH₄ detector), `test_history_plot.py` (per-cat Bokeh history plots), `test_rescore.py` (rescoring utility), `test_trend_anomaly.py` (long-term per-cat trend detector + auto-trigger).
 
@@ -74,7 +78,7 @@ Pytest test files: `test_db.py` (schema/migration), `test_health.py` (prompt bui
 ### Litter Box Agent (`src/litterbox_agent.py` + `src/litterbox/`)
 - Model: `gpt-4o` (vision required)
 - Memory: `data/agent_litterbox_memory.db`; thread IDs `"sensor"` vs `"interactive"` maintain separate histories
-- **`src/litterbox/db.py`** — SQLite schema (cats, cat_images, visits, visit_sensor_events); `init_db()` is idempotent with automatic migration for old DBs missing sensor columns
+- **`src/litterbox/db.py`** — SQLite schema (cats, cat_images, visits, visit_sensor_events); `init_db()` is idempotent with automatic migration for old DBs missing sensor columns or the optional `cats.chip_id` hardware-ID mapping
 - **`src/litterbox/embeddings.py`** — CLIP (`clip-ViT-B-32`, downloads ~350 MB on first run) + Chroma vector search; `ID_THRESHOLD = 0.82`
 - **`src/litterbox/health.py`** — `build_health_prompt(**sensor_kwargs)` assembles the GPT-4o prompt with optional sensor readings and (when an alarm tier is provided) a "Statistical sensor anomaly detector output" block grounded in the cat's own history. The preamble includes anti-refusal language ("no people, no faces, no humans... pareidolic shapes are litter material") to suppress OpenAI content-policy false positives on litter pareidolia. `parse_health_response()` parses `CONCERNS_PRESENT` into a bool. `safe_health_notes()` is the storage-side sanitiser: when the LLM didn't return a structured response (refusal, malformed), it substitutes a clean placeholder pointing the reader at the gas-anomaly columns rather than persisting the refusal text. `HEALTH_PROMPT` constant preserved for backward compatibility.
 - **`src/litterbox/gas_anomaly.py`** — Data-driven per-cat NH₃/CH₄ detector. Median + MAD-based sigma on `log1p`-transformed peak readings, signed z-scores, alarm only on the high tail, tier ∈ {`normal`, `mild`≥2σ, `significant`≥3σ, `severe`≥5σ, `insufficient_data`}. Fits on demand from the `visits` table — no separate persisted model. Per-cat fit when ≥`min_visits_per_cat` non-null readings, else pooled fallback at ≥`min_visits_pooled`, else `insufficient_data`. Excludes the current visit_id from its own fit. Robust statistics (50% breakdown point) so historical contamination by prior anomalies doesn't suppress new ones.
@@ -95,7 +99,7 @@ Each visit can capture readings from a weight scale and gas sensors. Data flows 
 - **Summary columns on `visits`**: `weight_pre_g`, `weight_entry_g`, `weight_exit_g`, `cat_weight_g` (derived: entry − pre), `waste_weight_g` (derived: exit − pre), `ammonia_peak_ppb`, `methane_peak_ppb` (peak = MAX of entry and exit readings); plus the gas-anomaly score persisted by `record_exit` (and rewritten by `rescore.py`): `ammonia_z_score`, `methane_z_score`, `gas_anomaly_tier`, `gas_anomaly_n_samples`, `gas_anomaly_model_used` (`per_cat`, `pooled`, or `insufficient_data`), and `gas_anomaly_rescored_at` (set only when `rescore.py` updates the row).
 - **Time-series log in `visit_sensor_events`**: one row per reading with `phase` (pre_entry / entry / exit), `sensor_type`, `value_numeric`, and `unit`
 
-CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`. All are optional — omit any that are unavailable or malfunctioning. The flags are serialised into the sensor event prompt string; the LLM extracts the named values and passes them to the tool. See `docs/USER_GUIDE.md` §6 for full CLI examples and derivation rules.
+CLI flags: `--weight-pre G`, `--weight-entry G`, `--weight-exit G`, `--ammonia-peak PPB`, `--methane-peak PPB`. All are optional — omit any that are unavailable or malfunctioning. The project-root script (`python src/litterbox_agent.py --event ...`) serialises these flags into a sensor event prompt that LangGraph routes to the tools. The installed console script (`litterbox-agent --event ...`) bypasses LangGraph and calls the direct Python API with the parsed flag values. See `docs/USER_GUIDE.md` §6 for full CLI examples and derivation rules.
 
 ### Health Analysis
 `record_exit()` runs two parallel checks and ORs their verdicts into `visits.is_anomalous`:
@@ -355,7 +359,7 @@ Concrete drivers (one per channel type):
 | `WeightDriver` | `weight` | scale hardware via serial/I²C | Returns configurable static value + Gaussian noise |
 | `AmmoniaDriver` | `ammonia` | MQ-135 / ENS160 ADC | Returns configurable static value + noise |
 | `MethaneDriver` | `methane` | MQ-4 / MQ-9 ADC | Returns configurable static value + noise |
-| `ChipIdDriver` | `chip_id` | RFID/NFC reader | Returns configurable cat name or None |
+| `ChipIdDriver` | `chip_id` | RFID/NFC reader | Returns configurable raw chip ID / cat name or None |
 | `SimilarityDriver` | `similarity` | CLIP embedder + current camera frame | Returns dict `{cat_name: score}` for all registered cats |
 
 `SimilarityDriver` is the only driver whose `read()` returns a `dict` rather
@@ -501,7 +505,7 @@ on_visit_complete(
   rise-then-fall.
 - `reset()` returns to KITTY_ABSENT mid-visit without firing the callback.
 
-**Step 3 status: COMPLETE** — 34/34 tests pass.
+**Step 3 status: COMPLETE** — 35/35 tests pass.
 
 ---
 
@@ -558,8 +562,10 @@ Design rules for the DataFrame:
 **Cat identification from the snapshot — priority order:**
 
 1. **Chip ID** — if any sample in the visit window has a non-null `chip_id`,
-   use the most frequent non-null value.  Mark `is_confirmed = True`.
-   No DataFrame analysis needed.
+   use the most frequent non-null value.  Mark `is_confirmed = True` only when
+   that chip value maps to a registered cat via `cats.chip_id`. A simulator
+   value that matches a cat name may populate `tentative_cat_id`, but remains
+   unconfirmed for human review. No DataFrame analysis needed.
 
 2. **Similarity DataFrame** — applicable only when the `similarity` channel
    is enabled.  Steps:
@@ -585,8 +591,8 @@ Design rules for the DataFrame:
   on disk, configurable).
 - On visit completion, frames captured between `entry_time` and `exit_time`
   are written to `images/visits/YYYY-MM-DD/<visit_uuid>/frame_NNNN.jpg`.
-- A background task runs daily and deletes visit image directories older than
-  `image_retention_days` (default 7).
+- `image_retention.py` exposes a sweep utility that deletes visit image
+  directories older than `image_retention_days` (default 7) when called.
 
 **New DB table — `td_visits`:**
 
@@ -619,20 +625,23 @@ VisitAnalyser
       Runs the ID priority logic above.
       Returns a dataclass with all fields needed for DB insertion.
 
-  save(record: TdVisitRecord, images: list[Path]) → int
-      Writes to td_visits, copies images to permanent storage.
+  save(record: TdVisitRecord) → int
+      Writes to td_visits.
       Returns the new td_visit_id.
-      Triggers image deletion sweep for entries older than retention policy.
 ```
 
 **Integration with existing tools:**
 
-- `confirm_identity` tool gains an optional `td_visit_id` parameter so owners
-  can confirm time-domain visits the same way they confirm snapshot visits.
-- `get_unconfirmed_visits` returns both `visits` and `td_visits` rows.
-- Health analysis: the same `build_health_prompt` / `parse_health_response`
-  pipeline is run against the entry and exit frames from the image folder if
-  a camera is present.
+- `VisitAnalyser.save()` persists time-domain visits to `td_visits`.
+- `image_retention.py` provides the deletion sweep for old visit image
+  directories as a separate utility.
+- `get_unconfirmed_visits()` surfaces both classic `visits` rows (`#7`) and
+  time-domain `td_visits` rows (`td:7`). `confirm_identity()` accepts the same
+  namespace, so time-domain tentative chip results can be reviewed and
+  confirmed without confusing the two integer ID spaces. Confirming a `td:` row
+  with a raw `chip_id` stores that chip on the confirmed cat when no mapping
+  conflict exists and the chip value is not a registered cat name, so later
+  visits with the same real chip auto-confirm.
 
 **Files created in Step 4:**
 - `src/litterbox/visit_analyser.py` — `VisitAnalyser`, `TdVisitRecord`
@@ -640,8 +649,10 @@ VisitAnalyser
 - `src/litterbox/db.py` — `td_visits` table added to `init_db()` with migration
 
 **Tests for Step 4:**
-- `analyse()` returns chip-ID result (is_confirmed=True) when chip column is
-  populated; DataFrame analysis is skipped entirely.
+- `analyse()` returns a confirmed chip-ID result when the chip value maps to a
+  registered cat via `cats.chip_id`, a tentative unconfirmed result for the
+  simulator cat-name fallback, and an unconfirmed raw chip result when the chip
+  value is not yet registered; DataFrame analysis is skipped entirely.
 - `analyse()` returns correct tentative cat when similarity columns are above
   threshold, sustained-peak gate passes, and chip column is absent.
 - `analyse()` returns Unknown when all column means are below threshold.
@@ -657,9 +668,12 @@ VisitAnalyser
 - `save()` inserts a row and returns a valid `td_visit_id`.
 - Deletion sweep removes image directories older than retention window and
   leaves newer ones intact.
-- `confirm_identity` with `td_visit_id` updates the correct table.
+- `get_unconfirmed_visits` lists saved unconfirmed `td_visits` as `td:<id>`,
+  and `confirm_identity("td:<id>", cat_name)` confirms them and learns
+  non-conflicting raw chip mappings unless the chip value is a simulator
+  cat-name fallback.
 
-**Step 4 status: COMPLETE** — `visit_analyser.py`, `image_retention.py`, `td_visits` schema, 23 tests pass.
+**Step 4 status: COMPLETE** — `visit_analyser.py`, `image_retention.py`, `td_visits` schema, and time-domain review/confirmation coverage are tested.
 
 ---
 

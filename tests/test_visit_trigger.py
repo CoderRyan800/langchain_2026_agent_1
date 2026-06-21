@@ -189,6 +189,19 @@ class TestWeightTrigger:
         assert trig.state == KITTY_ABSENT
         assert coll.count == 1
 
+    def test_collector_appended_entry_sample_not_used_as_own_baseline(self):
+        """A sparse collector buffer should compare entry weight to prior samples."""
+        trig, buf, coll = self._setup(n_baseline=1)
+
+        values = {"weight_g": self.BASELINE + self.ENTRY + 50}
+        ts = _ts(100)
+        # SensorCollector appends before invoking VisitTrigger.check().
+        buf.append(ts, values)
+        trig.check(values, timestamp=ts)
+
+        assert trig.state == KITTY_PRESENT
+        assert coll.count == 0
+
     def test_entry_and_exit_times_correct(self):
         """entry_time and exit_time passed to callback match check() timestamps."""
         trig, buf, coll = self._setup()

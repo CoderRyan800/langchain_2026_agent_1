@@ -16,6 +16,10 @@ Read the document that matches your role:
 - **[Quickstart](docs/QUICKSTART.md)** — for cat owners. Plain English. What
   the system is, how to set it up, how to use day-to-day, what alarms mean,
   when to call the vet.
+- **[Pi Scale Integration](docs/PI_SCALE_INTEGRATION.md)** — for deploying on a
+  Raspberry Pi with a real weight scale. The continuous monitor
+  (`litterbox-monitor`), the one driver method you implement, calibration, the
+  acceptance test, and the systemd service. **Start here for hardware.**
 - **[User Guide](docs/USER_GUIDE.md)** — for power users. Comprehensive
   reference: setup details, all commands, sensor integration, database
   schema, troubleshooting.

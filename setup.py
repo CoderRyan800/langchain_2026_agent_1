@@ -32,6 +32,11 @@ setup(
     ],
     extras_require={
         "bob": ["tavily-python>=0.7.17"],
+        # Hardware-facing deps for a real Raspberry Pi deployment. Left empty
+        # here because the concrete scale/gas/RFID/camera libraries depend on
+        # the specific hardware chosen — add them on-device (e.g. "hx711",
+        # "RPi.GPIO", "picamera2"). See docs/PI_SCALE_INTEGRATION.md.
+        "pi": [],
         "dev": [
             line
             for line in Path("requirements-dev.txt").read_text(encoding="utf-8").splitlines()
@@ -44,9 +49,10 @@ setup(
         "console_scripts": [
             "litterbox-agent=litterbox._cli:main",
             "litterbox-bob=litterbox._cli:bob",
+            "litterbox-monitor=litterbox.daemon:main",
         ],
     },
-    package_data={"litterbox": ["td_config.json"]},
+    package_data={"litterbox": ["td_config*.json"]},
     classifiers=[
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.11",

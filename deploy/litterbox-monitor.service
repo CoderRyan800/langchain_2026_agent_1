@@ -1,0 +1,47 @@
+# systemd unit for the continuous litter-box monitor (Mode B).
+#
+# INSTALL (on the Raspberry Pi):
+#   1. Edit the placeholders below (User, WorkingDirectory, ExecStart path,
+#      EnvironmentFile) to match your install.
+#   2. sudo cp deploy/litterbox-monitor.service /etc/systemd/system/
+#   3. sudo systemctl daemon-reload
+#   4. sudo systemctl enable --now litterbox-monitor
+#   5. journalctl -u litterbox-monitor -f          # watch the logs
+#
+# The monitor must NOT start until you have implemented build_scale_driver()
+# in src/litterbox/daemon.py — until then it exits with a clear message.
+# See docs/PI_SCALE_INTEGRATION.md.
+
+[Unit]
+Description=Litter Box Monitor (continuous time-domain scale monitor)
+# Only relevant once a later sensor needs the network (the scale-only phase is
+# fully offline). Harmless to leave in.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# --- EDIT THESE ---------------------------------------------------------
+User=pi
+WorkingDirectory=/home/pi/langchain_2026_agent_1
+# Absolute path to the console script inside your venv/conda env.
+# `--no-retention` is recommended until a camera is installed (no frames to
+# prune, and nothing to accidentally delete).
+ExecStart=/home/pi/langchain_2026_agent_1/.venv/bin/litterbox-monitor --no-retention
+# OPENAI_API_KEY etc. — only needed later when a camera/GPT-4o path is added.
+# The scale-only monitor does not call any API. Safe to point at your .env.
+EnvironmentFile=/home/pi/langchain_2026_agent_1/.env
+# ------------------------------------------------------------------------
+
+# Restart on crash or power-blip reboot so the monitor is self-healing.
+Restart=on-failure
+RestartSec=5
+
+# Logs go to the journal; cap its size in /etc/systemd/journald.conf
+# (SystemMaxUse=) so an SD card can't fill over months.
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

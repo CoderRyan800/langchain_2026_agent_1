@@ -1,0 +1,121 @@
+{
+  "_comment": "SCALE-ONLY PRESET. A full, valid td_config with only the weight channel enabled — the starting point for a Raspberry Pi with a scale and no other sensors yet. The daemon (python -m litterbox.daemon) loads this by default. When you install a gas sensor, chip reader, or camera, flip its channel's \"enabled\" to true here and add its driver in build_drivers() in daemon.py. See docs/PI_SCALE_INTEGRATION.md.",
+
+  "window_minutes": 10,
+  "samples_per_minute": 12,
+
+  "channels": [
+    {
+      "name":    "weight_g",
+      "type":    "weight",
+      "enabled": true,
+      "_comment": "Box + litter + cat weight in grams from the scale. The ONLY enabled channel in the scale-only preset."
+    },
+    {
+      "name":    "ammonia_ppb",
+      "type":    "ammonia",
+      "enabled": false,
+      "_comment": "Disabled until a gas sensor is installed. Set enabled=true and add an AmmoniaDriver in build_drivers()."
+    },
+    {
+      "name":    "methane_ppb",
+      "type":    "methane",
+      "enabled": false,
+      "_comment": "Disabled until a gas sensor is installed."
+    },
+    {
+      "name":    "chip_id",
+      "type":    "chip_id",
+      "enabled": false,
+      "_comment": "Disabled until a microchip/RFID reader is installed. Without it (and without a camera), every visit is recorded as 'unknown' identity — fine for a single-cat household."
+    },
+    {
+      "name":    "similarity",
+      "type":    "similarity",
+      "enabled": false,
+      "_comment": "Disabled until a camera is installed. The CLIP visual-ID pipeline is off in the scale-only phase."
+    }
+  ],
+
+  "trigger": {
+    "weight_entry_delta_g":            300,
+    "weight_exit_delta_g":             200,
+    "chip_absent_consecutive":           3,
+    "similarity_entry_threshold":      0.70,
+    "similarity_exit_threshold":       0.50,
+    "similarity_sustained_peak_samples": 3,
+    "_comment": "TUNE THESE FOR YOUR CAT. weight_entry_delta_g must be BELOW your cat's body weight in grams (a 4 kg cat easily clears 300 g; a 2.5 kg kitten also does). weight_exit_delta_g is the drop-back threshold and is intentionally smaller than the entry delta to create a hysteresis band that stops rapid oscillation. The chip_* and similarity_* thresholds are inert while those channels are disabled."
+  },
+
+  "image_retention_days": 7,
+  "_comment2": "No camera in the scale-only phase, so no images are written; the daemon's daily retention sweep is a harmless no-op until a camera is added.",
+
+  "gas_anomaly": {
+    "min_visits_per_cat": 10,
+    "min_visits_pooled":   30,
+    "z_score_thresholds": {
+      "mild":         2.0,
+      "significant":  3.0,
+      "severe":       5.0
+    },
+    "_comment": "Inert until gas sensors are added, but kept here so enabling the gas channels later needs no other config change."
+  },
+
+  "eigen": {
+    "resample_length": 64,
+    "explained_variance_threshold": 0.95,
+    "pooled_minimum": 128,
+    "per_cat_minimum": 32,
+    "regularization_epsilon": 0.01,
+    "max_nan_fraction": 0.25,
+    "anomaly_thresholds": {
+      "normal": 0.90,
+      "mild": 0.70,
+      "significant": 0.40
+    },
+    "uniform_n": 4,
+    "uniform_n_coverage": 0.95,
+    "_comment": "Layer-1 eigenanalysis config (used by the offline analyser pipeline, not the live daemon). Kept intact so nothing else needs editing."
+  },
+
+  "cluster": {
+    "min_samples_for_clustering": 20,
+    "min_samples_per_cluster": 15,
+    "max_clusters": 5,
+    "n_init": 5,
+    "z_score_thresholds": {
+      "mild": -2.0,
+      "significant": -3.0,
+      "major": -4.0
+    },
+    "_comment": "Layer-2 GMM cluster config (offline analyser pipeline)."
+  },
+
+  "trend_anomaly": {
+    "days_recent":           14,
+    "days_baseline":         75,
+    "min_visits_recent":      5,
+    "min_visits_baseline":   10,
+
+    "z_score_thresholds": {
+      "mild":         2.0,
+      "significant":  3.0,
+      "severe":       5.0
+    },
+
+    "weight_pct_thresholds": {
+      "mild":         0.05,
+      "significant":  0.10,
+      "severe":       0.15
+    },
+
+    "constipation": {
+      "no_waste_g_cutoff":         5.0,
+      "min_no_waste_rate":         0.50,
+      "min_no_waste_ratio":        2.0,
+      "min_waste_z_score":        -2.0
+    },
+
+    "_comment": "Long-term per-cat trend detector. This is the detector that actually delivers value in the scale-only phase: it tracks slow weight drift over weeks. Weight-based tiers work with the scale alone; the gas/waste channels stay inert until those sensors arrive."
+  }
+}

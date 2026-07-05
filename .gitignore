@@ -1,5 +1,8 @@
 .env
 agent_memory.db
+agent_memory.db-*
+*.db-shm
+*.db-wal
 __pycache__/
 *.pyc
 data/

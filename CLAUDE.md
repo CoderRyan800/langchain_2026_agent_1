@@ -733,15 +733,23 @@ calibrated. See `docs/USER_GUIDE.md` §12.10–12.15.
 ```
 src/litterbox/
 ├── td_config.json          # configuration (window, sample rate, channels, thresholds, eigen, cluster)
+├── td_config.weight_only.json # scale-only preset (gas/chip/camera channels disabled); daemon default
 ├── time_buffer.py          # Step 1 — RollingBuffer + load_td_config()
 ├── sensor_collector.py     # Step 2 — BaseDriver, all drivers, SensorCollector
 ├── visit_trigger.py        # Step 3 — VisitTrigger state machine
 ├── visit_analyser.py       # Step 4 — VisitAnalyser, TdVisitRecord
 ├── image_retention.py      # Step 4 — visit image deletion sweep
+├── daemon.py               # Runtime — continuous monitor (Mode B); wires collector→trigger→analyser
 ├── eigen_analyser.py       # Step 5a — eigendecomposition / EV scoring (Layer 1)
 ├── cluster_analyser.py     # Step 5c — GMM+BIC on coefficients (Layer 2)
 ├── eigen_query.py          # Step 5  — read-side query helpers for reports/tools
 └── analyser_pipeline.py    # Step 5  — plugin orchestration (resample → eigen → cluster)
+
+deploy/
+└── litterbox-monitor.service  # systemd unit for the daemon (boot-start, restart-on-crash)
+
+docs/
+└── PI_SCALE_INTEGRATION.md    # on-device guide: implement build_scale_driver(), run, install as service
 
 tests/
 ├── test_time_buffer.py     # Step 1 tests
@@ -765,3 +773,29 @@ tests/
 | 5a  | Eigendecomposition / EV anomaly scoring (Layer 1) | COMPLETE |
 | 5b  | Query API + HTML report integration | COMPLETE |
 | 5c  | GMM+BIC cluster analysis on coefficients (Layer 2) | COMPLETE |
+
+### Runtime — Continuous Monitor Daemon (Mode B) — `src/litterbox/daemon.py`
+
+The long-running process that composes the time-domain building blocks into an
+unattended monitor: `load_td_config → RollingBuffer → SensorCollector(on_sample=trigger.check)
+→ VisitTrigger(on_visit_complete=…) → VisitAnalyser.analyse/save`. Before this,
+Steps 1–5 existed only as libraries exercised by tests and the simulator (audit
+blocker B2); the daemon is the missing runtime.
+
+- **Hardware seam:** `build_scale_driver()` is the single documented integration
+  point — a stub that raises `NotImplementedError` until an on-device deployer
+  returns a real `BaseDriver` reading the physical scale in grams. This is
+  deliberately the only edit needed to go from mock to real hardware.
+- **Run modes:** `--self-test` (deterministic, hardware-free acceptance test:
+  a scripted weight ramp must fire exactly one visit, isolated temp DB),
+  `--simulate` (real-time loop with a mock scale, no hardware), default
+  (production; fails fast until `build_scale_driver` is implemented).
+  `--config PATH` selects a config (defaults to the scale-only preset);
+  `--images-dir PATH` and `--no-retention` control the daily retention sweep.
+- **Ops:** SIGINT/SIGTERM clean shutdown, periodic heartbeat log
+  (buffer depth / last-sample age / trigger state), daily image-retention sweep
+  (off by default via `--no-retention` until a camera exists — the sweep is
+  destructive). Visit-handler exceptions are caught so one bad visit can't kill
+  the sampler thread. Installed as `litterbox-monitor`; systemd unit in
+  `deploy/`. Scale-only visits are recorded with `id_method="unknown"` and make
+  **no** LLM/network calls. See `docs/PI_SCALE_INTEGRATION.md`.

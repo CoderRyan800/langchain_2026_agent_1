@@ -361,16 +361,26 @@ rm -rf ~/.litterbox_monitor/
 
 ## 11. Integration Example — Raspberry Pi Sensor Script
 
+> **For a real Pi deployment, see [`PI_SCALE_INTEGRATION.md`](PI_SCALE_INTEGRATION.md)**
+> for the supported continuous monitor (`litterbox-monitor`). The example below
+> is the **alternative event-driven (Mode A)** style, where you own the trigger
+> loop; `scale` / `gas_sensor` are **illustrative placeholders** for your own
+> hardware code.
+
 This shows how a sensor daemon might call the API when the camera detects motion.
 
 ```python
 #!/usr/bin/env python3
-"""litterbox_sensor_daemon.py — called by camera motion trigger."""
+"""litterbox_sensor_daemon.py — called by camera motion trigger.
+
+ILLUSTRATIVE (Mode A). `scale` / `gas_sensor` are stand-ins for your own hardware.
+Supported continuous monitor: see PI_SCALE_INTEGRATION.md.
+"""
 
 import sys
 from litterbox import LitterboxAgent
 
-# Sensor hardware libraries (example)
+# Sensor hardware libraries (illustrative placeholders — supply your own)
 from scale import read_weight
 from gas_sensor import read_ammonia, read_methane
 
